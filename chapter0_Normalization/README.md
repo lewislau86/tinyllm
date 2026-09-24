@@ -50,7 +50,23 @@ $$
 y_i=\gamma_i\frac{x_i-\mu}{\sqrt{\sigma^2+\epsilon}}+\beta_i
 $$
 
-**作用位置。**常用于 Transformer 子层前或残差相加后；这是 Pre-Norm / Post-Norm 的选择。PyTorch `LayerNorm` 通常默认学习 `weight` 和 `bias`，即 `2d` 个参数，也可以关闭其中的仿射参数。
+**参数中文说明。**$x_i$ 是第 $i$ 个隐藏特征，$d$ 是隐藏维度；$\mu$ 是该 token 的均值，$\sigma^2$ 是方差；$\epsilon$ 防止分母为零；$\gamma_i$ 和 $\beta_i$ 分别是第 $i$ 维可学习的缩放与平移参数，输出为 $y_i$。
+
+**PyTorch 调用。**假设 `x` 的形状为 `[batch, seq, d]`：
+
+```python
+layer_norm = nn.LayerNorm(
+    normalized_shape=d,       # 只归一化最后一维，长度为 d
+    eps=1e-5,                # 加在方差上，避免分母为零
+    elementwise_affine=True, # 学习逐维 weight（gamma）和可选 bias（beta）
+    bias=True,               # 学习逐维平移；False 时仍可保留 weight
+)
+y = layer_norm(x)            # 输出形状仍为 [batch, seq, d]
+```
+
+`elementwise_affine=False` 会同时关闭 `weight` 与 `bias`；默认二者各有 `d` 个参数。参见 [PyTorch LayerNorm 文档](https://docs.pytorch.org/docs/stable/generated/torch.nn.LayerNorm.html)。
+
+**作用位置。**常用于 Transformer 子层前或残差相加后；这是 Pre-Norm / Post-Norm 的选择。
 
 **目的与取舍。**输出在应用 $\gamma,\beta$ 前均值为零、方差接近一。对所有分量同时加同一个常数时，居中步骤会消除这个偏移。它需要计算均值和方差；实际运行速度取决于内核和硬件，不能只凭算术步骤断言性能。
 
@@ -65,7 +81,22 @@ $$
 y_i=\gamma_i\frac{x_i}{\mathrm{RMS}(x)}
 $$
 
-**作用位置。**和 LayerNorm 一样，可放在注意力或前馈子层的输入、输出附近。常见形式只有 `d` 个逐元素缩放参数，没有偏置；具体模型代码仍应逐一核对。
+**参数中文说明。**$x_i$ 和 $d$ 分别是第 $i$ 个隐藏特征和隐藏维度；$\mathrm{RMS}(x)$ 是该 token 各维平方的平均值再开方；$\epsilon$ 防止全零向量导致除零；$\gamma_i$ 是第 $i$ 维可学习缩放参数。标准形式没有 $\beta_i$ 平移项。
+
+**PyTorch 调用。**输入 `x` 的形状同样为 `[batch, seq, d]`：
+
+```python
+rms_norm = nn.RMSNorm(
+    normalized_shape=d,       # 沿最后一维计算 RMS
+    eps=1e-5,                # 加在平方均值上，避免分母为零
+    elementwise_affine=True, # 学习逐维 weight（gamma），不创建 bias
+)
+y = rms_norm(x)              # 输出形状仍为 [batch, seq, d]
+```
+
+`elementwise_affine=False` 会关闭 `weight`。`eps` 默认是 `None`，PyTorch 按内部计算类型（opmath dtype）的 machine epsilon 选取；官方文档说明 FP16/BF16 输入在此采用 FP32 的 epsilon。这里显式写 `1e-5` 便于比较。参见 [PyTorch RMSNorm 文档](https://docs.pytorch.org/docs/stable/generated/torch.nn.RMSNorm.html)。
+
+**作用位置。**和 LayerNorm 一样，可放在注意力或前馈子层的输入、输出附近；具体模型代码仍应逐一核对。
 
 **目的与取舍。**控制向量尺度，保留均值信息；输出通常不以零为中心。省去居中与方差计算，但不能据此保证任意实现都更快。RMSNorm 论文在其测试的模型和实现中报告约 7%–64% 的速度提升，这不是通用硬件指标。FP16/BF16 的稳定性仍取决于累加精度、$\epsilon$ 和内核。
 
@@ -80,7 +111,31 @@ $$
 y=g\frac{x}{\|x\|_2+\epsilon}
 $$
 
-**作用位置。**作为隐藏状态归一化，可用于 Transformer 子层周围。它的 $g$ 是**一个标量**，不像 LayerNorm/RMSNorm 的 $\gamma$ 是逐维参数。原论文还讨论了其他配套初始化和输出归一化设计，不能把整篇论文的效果全归因于 ScaleNorm。
+**参数中文说明。**$x$ 是一个 token 的完整隐藏向量；$\|x\|_2$ 是它的 L2 长度，即各维平方求和再开方；$g$ 是一个可学习标量，用来决定输出向量的目标长度；$\epsilon$ 防止零向量除零。与逐维的 $\gamma_i$ 不同，一个 ScaleNorm 层通常只有一个 $g$。
+
+**PyTorch 调用。**PyTorch 没有同名的 `nn.ScaleNorm` 标准模块；以下代码与上面的公式一致：
+
+```python
+class ScaleNorm(nn.Module):
+    def __init__(self, eps=1e-6):
+        super().__init__()
+        self.g = nn.Parameter(torch.tensor(1.0))  # 一个可学习标量，控制长度
+        self.eps = eps                            # 防止零向量除零
+
+    def forward(self, x):
+        length = x.norm(
+            p=2,          # 计算 L2 范数
+            dim=-1,       # 沿隐藏维度计算
+            keepdim=True, # 保留末尾长度为 1 的维度，便于广播
+        )
+        return self.g * x / (length + self.eps)
+
+y = ScaleNorm()(x)            # x 和 y 都是 [batch, seq, d]
+```
+
+也可用 `F.normalize(x, p=2, dim=-1, eps=eps)` 实现近似形式，但其分母为 `max(norm, eps)`，在接近零时与上式不同。参见 [PyTorch `F.normalize` 文档](https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.normalize.html)。
+
+**作用位置。**作为隐藏状态归一化，可用于 Transformer 子层周围。原论文还讨论了其他配套初始化和输出归一化设计，不能把整篇论文的效果全归因于 ScaleNorm。
 
 **目的与取舍。**直接约束向量长度，形式简洁。不减均值，也不会像逐维 $\gamma$ 一样单独学习每个特征的缩放。$\epsilon$ 的放置和 $g$ 的共享方式要以具体实现为准；上式是便于教学的安全形式。
 
@@ -98,6 +153,31 @@ $$
 
 接着对所有允许关注的 key 的分数做 softmax。原始 QKNorm 论文使用 L2 归一化和可学习尺度，代替固定的 $1/\sqrt{d_k}$ 缩放。**QK Norm 是方法家族，不限于这一种公式**：一些较新的模型对每个注意力头的 Q/K 使用 RMSNorm，具体缩放和 RoPE 的先后顺序须看模型实现。
 
+**参数中文说明。**$q$ 是一个 query 向量，$k$ 是一个 key 向量，$d_k$ 是每个注意力头的特征维度；$\widehat q$ 和 $\widehat k$ 是归一化后的向量；$g$ 是调节注意力分数幅度的可学习尺度，$s(q,k)$ 是进入 softmax 前的分数。$\epsilon$ 防止零向量除零。这里的 L2 公式只是 QK Norm 的一种具体形式。
+
+**PyTorch 调用。**假设 `q/k/v` 的形状为 `[batch, heads, seq, head_dim]`，`g` 是已注册在模型中的可学习标量：
+
+```python
+q_unit = F.normalize(
+    q,       # query 向量
+    p=2,     # L2 归一化
+    dim=-1,  # 每个头的 head_dim 维度
+    eps=1e-6 # 防止零向量除零
+)
+k_unit = F.normalize(k, p=2, dim=-1, eps=1e-6)  # key 使用同样参数
+logits = (q_unit * g) @ k_unit.transpose(-2, -1) # [B, H, S_q, S_k]
+probs = logits.softmax(dim=-1)                   # 沿 key 位置计算概率
+out = F.scaled_dot_product_attention(
+    q_unit * g, # 先乘可学习尺度 g；scale 参数不能接收 Parameter
+    k_unit,     # 已归一化的 key
+    v,          # value 不在此处做 QK 归一化
+    is_causal=True, # 自回归模型禁止看未来 token
+    scale=1.0,  # 避免默认再乘 1 / sqrt(head_dim)
+)
+```
+
+这里的 `logits/probs` 便于教学观察；注意力函数直接返回加权后的 `out`。逐头 RMSNorm 版本可改用 `nn.RMSNorm(head_dim)` 处理 Q/K，但应遵守目标模型的具体顺序。参见 [PyTorch 注意力函数文档](https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html)。
+
 **作用位置。**注意力内部、Q/K 投影之后、点积之前。它不负责归一化残差流中的隐藏状态，因此可与 LayerNorm、RMSNorm 或 ScaleNorm 同时出现。
 
 **目的与取舍。**控制 query/key 范数和注意力 logits 的尺度，降低 softmax 因分数过大而饱和的风险。归一化可能改变注意力表达方式，并增加计算；不能只看名称就断言效果一定更好。
@@ -113,6 +193,24 @@ x_{\mathrm{next}}=\mathrm{LayerNorm}(\alpha x+F(x))
 $$
 
 $\alpha$ 以及部分权重初始化的缩放系数由网络结构和深度确定。只复制上式而不采用配套初始化，并不等于完整实现了 DeepNorm。
+
+**参数中文说明。**$x$ 是进入残差块的隐藏状态；$F(x)$ 是注意力或前馈子层的输出；$\alpha$ 控制残差路径中原输入的权重；$x_{\mathrm{next}}$ 是经过残差相加和 LayerNorm 后的输出。完整 DeepNorm 还包含依网络深度和结构确定的初始化缩放系数，不能只给 $\alpha$ 一个任意值。
+
+**PyTorch 调用。**PyTorch 没有 `nn.DeepNorm` 标准模块。下面只展示残差块的局部前向式，假设 `sublayer` 已定义且输出形状与 `x` 相同：
+
+```python
+alpha = 1.5                 # 仅为演示；真实值由网络深度与结构确定
+norm = nn.LayerNorm(
+    normalized_shape=d,     # 归一化最后一维
+    eps=1e-5,              # 防止方差为零
+)
+branch = sublayer(x)        # 注意力或前馈子层输出，形状同 x
+y = norm(alpha * x + branch) # 先缩放残差、相加，再归一化
+```
+
+完整 DeepNorm 还要求按 [DeepNet 论文](https://arxiv.org/abs/2203.00555) 为相应编码器/解码器设置 `alpha` 和线性层初始化；单独调用 `nn.LayerNorm` 不能代表整个方案。
+
+对 **decoder-only、共 $M$ 个 Transformer 层** 的情况，论文给出 $\alpha=(2M)^{1/4}$、初始化缩放 $\beta=(8M)^{-1/4}$。先对层权重做标准初始化（论文举 Xavier 为例），再用 $\beta$ 缩放前馈网络的权重，以及注意力的 value 投影和 output 投影权重；query/key 投影不在这份指定清单内。编码器或 encoder-decoder 的系数不同，不能套用这组公式。计算、初始化时机和被缩放的权重清单见 [DeepNet 论文第 4.3 节](https://arxiv.org/pdf/2203.00555)。[`ch0.ipynb`](./ch0.ipynb) 会计算给定 $M$ 的系数并对小模块做一次初始化演示；这仍不是深层训练效果验证。
 
 **作用位置。**整个残差块，而非单个 token 向量的独立归一化公式。它保留了 LayerNorm，同时改变残差路径与初始化。
 
@@ -144,6 +242,28 @@ Post-Norm:  output = Norm(x + F(x))
 ```
 
 QK Norm 插在 $F$ 的注意力内部，不属于上面 `Norm(x)` 的同一个位置。DeepNorm 改写残差块并配合初始化。实际模型可以同时包含多种方案，不能只用一个词概括整套归一化设计。
+
+### 在一个 decoder-only Block 中看位置
+
+下面的示意图表示一种**可组合的布局**，不是某个具体预训练模型的逐层复刻。`Norm` 可选 LayerNorm、RMSNorm 或 ScaleNorm；QK Norm 只处理注意力内部的 Q/K；DeepNorm 则要求替换残差连接和初始化规则。
+
+```text
+输入 x ────────────────┐
+  │                   │
+  └→ Norm → Q/K/V 投影 │
+              ├→ QK Norm(Q, K) → QKᵀ → mask → softmax → 加权 V → 输出投影
+              │                                           │
+              └───────────────────────────────────────────┘
+                       │
+          普通 Pre-Norm：x + Attention(Norm(x))
+                       │
+          再经过 Norm → MLP → 残差相加 → 下一 Block
+
+DeepNorm 改动的是残差块：LayerNorm(alpha * x + 子层输出)，
+并按网络深度设置 alpha 和指定权重的初始化缩放 beta。
+```
+
+因果 mask 必须在 softmax 前施加。QK Norm 的具体实现可能安排在 RoPE 前或后，应以目标架构为准。图中的 `Norm → Q/K/V 投影` 与 `Attention(Norm(x))` 是同一条路径的展开。
 
 **手算检查。**取 $x=[1,2,3]$，仅为方便计算暂设 $\epsilon=0$，并令缩放参数为 1、平移参数为 0：
 
@@ -219,14 +339,20 @@ DeepNorm 也没有一个单独的 `nn.DeepNorm` 调用。`nn.LayerNorm(d)(alpha 
 | QK Norm | 长度差异很大的两个 Q/K 向量 | 原始 `QK` 最大分数为 100；L2 归一化后最大分数为 1，并改变 softmax 概率 |
 | DeepNorm 残差示意 | 相同 `x` 和分支输出，比较 `alpha=1` 与 `alpha=1.5` | 改变残差输入相加前的比例，会改变 LayerNorm 的输入与输出；`1.5` 只是演示值，不是论文系数 |
 
+notebook 还提供完整的 **输入平移/正数缩放对照**、**decoder-only DeepNorm 系数与初始化名单**，以及下面的 **FP32/FP16/BF16 数值实验**。这些单元格对应本章第 7 节的位置说明、第 5 节的 DeepNorm 公式和第 10 节的精度讨论。
+
 **读数提示：**非零输入经过默认 LayerNorm 后的 RMS 约为 1；经过默认 RMSNorm 后的 RMS 约为 1；经过 `g=1` 的 ScaleNorm 后的 **L2** 约为 1。这三个“约为 1”对应不同统计量，不能混为一谈。全零向量是例外。`eps` 会使数值略偏离 1，学到的 `weight/bias` 也会改变这些输出性质。
+
+### 实验：给输入平移或缩放
+
+在 [`ch0.ipynb`](./ch0.ipynb) 中，用同一个向量分别计算 `x`、`x + c`、`a * x`，并分别送入三种方法。暂不考虑 $\epsilon$ 和学到的仿射参数时，LayerNorm 对所有维度加同一个常数不敏感；RMSNorm、ScaleNorm 一般会改变结果。对正的整体乘数 $a$，三者理论上都保持输出不变；当 $\epsilon$ 不可忽略或低精度输入已经舍入时，只能说**近似**不变。负乘数会翻转输出符号（LayerNorm 有非零偏置时还需另外考虑偏置）。
 
 ### PyTorch 函数与参数速查
 
 | 调用 | 本实验中的参数 | 参数含义与常见坑 |
 | --- | --- | --- |
 | `nn.LayerNorm(normalized_shape=d, eps=1e-5)` | `d=4`；默认 `elementwise_affine=True, bias=True` | 整数 `d` 表示只归一化最后一维；`eps` 加在方差上；默认有形状为 `[d]` 的 `weight` 和 `bias`。`bias=False` 只关闭偏置，`elementwise_affine=False` 同时关闭可学习仿射参数。 |
-| `nn.RMSNorm(normalized_shape=d, eps=1e-5)` | `d=4`；默认 `elementwise_affine=True` | 只归一化最后一维；默认有 `[d]` 的 `weight`，没有 `bias` 参数。PyTorch 默认 `eps=None`，实际值由计算 dtype 决定；本课显式设为 `1e-5`，便于比较。 |
+| `nn.RMSNorm(normalized_shape=d, eps=1e-5)` | `d=4`；默认 `elementwise_affine=True` | 只归一化最后一维；默认有 `[d]` 的 `weight`，没有 `bias` 参数。默认 `eps=None` 时按内部计算类型选 epsilon；本课显式设为 `1e-5`。 |
 | `F.normalize(x, p=2, dim=-1, eps=1e-6)` | `p=2` 为 L2；`dim=-1` 为隐藏维度 | `F.normalize` 的默认 `dim=1`，对 `[batch, seq, hidden]` 会沿 **seq** 而非 hidden 归一化，所以这里必须显式传 `-1`；计算为 `x / max(L2(x), eps)`。 |
 | `x.norm(p=2, dim=-1, keepdim=True)` | `keepdim=True` | 得到 `[batch, seq, 1]` 范数，便于广播回原向量；`clamp_min(1e-6)` 避免零分母。 |
 | `F.scaled_dot_product_attention(q, k, v, is_causal=False, scale=1.0)` | Q/K/V 为 `[batch, heads, seq, head_dim]` | 返回注意力加权后的 V，**不返回 logits 或概率矩阵**；实验单独用矩阵乘法打印 logits。默认 `scale` 为 $1/\sqrt{d_k}$，这里显式设 `1.0` 以观察归一化的影响。自回归注意力应设置 `is_causal=True`。 |
@@ -234,6 +360,22 @@ DeepNorm 也没有一个单独的 `nn.DeepNorm` 调用。`nn.LayerNorm(d)(alpha 
 可学习参数可用 `module.named_parameters()` 查看。notebook 会打印 LayerNorm 的 `weight/bias` 和 RMSNorm 的 `weight`。`F.normalize` 与 `Tensor.norm` 本身不创建参数；ScaleNorm 的标量 `g` 要作为 `nn.Parameter` 注册在模型里。前面 API 示例展示了这种写法，notebook 为便于对照把 `g` 固定为 1。
 
 **实验边界：**QK Norm 演示使用 L2 版本；DeepNorm 演示仅展示残差公式中的 $\alpha$，没有构建完整深层网络和论文初始化。之后若比较训练稳定性与速度，应在相同数据、深度、dtype、设备和计时方式下做专门实验。
+
+## 10. BF16/FP16 对归一化有什么影响？
+
+归一化的公式涉及均值或平方和，再做除法。输入 dtype 影响**输入能表示的数**，统计量的计算 dtype 和算子实现影响**中间结果**，输出 dtype 又影响最终的舍入。不能只看输入标着 BF16/FP16 就断言整个计算都在该 dtype 中完成。
+
+| dtype | 主要特点 | 归一化中的典型风险 |
+| --- | --- | --- |
+| FP32 | 动态范围和有效精度都较高 | 作为本章的数值参考，但不同内核仍可能有细微差异 |
+| FP16 | 有效精度比 BF16 高，但动态范围窄 | 很小的数可能下溢或被舍入为 0；很大的数、平方或累加可能溢出 |
+| BF16 | 指数范围接近 FP32，但有效精度比 FP16 低 | 较大的基数上，小差异可能在输入转换时消失，尤其影响需要先减均值的 LayerNorm |
+
+`torch.finfo(dtype).eps` 是 **1 附近可分辨的相对间隔**；`tiny` 是最小正规范数正数，`max` 是最大有限数。它们意义不同，也与归一化层构造函数中的 `eps` 参数不同。FP16 与 BF16 的实际表示范围可用 notebook 中的 `torch.finfo` 在本机查看。[PyTorch 数值类型文档](https://docs.pytorch.org/docs/stable/type_info.html) 对这些字段有定义。
+
+notebook 分别演示三类情况：① FP16 对微小值的舍入/下溢，② BF16 在较大基数上丢失微小差异，③ 先在低精度中平方与先转成 FP32 再平方的差别。最后比较 `nn.LayerNorm`、`nn.RMSNorm` 在 FP32/FP16/BF16 输入上的输出与 FP32 参考结果。**差异不能一概归因于公式**：输入一旦转换成低精度并丢失信息，后续转回 FP32 也无法恢复。
+
+实际训练中常用混合精度，并由框架/内核决定某些统计计算的更高精度路径。若自己手写归一化，可明确采用 `x.float()` 计算均值或平方均值、除法，再按需要转回输入 dtype；这只保护转换之后的计算，不能弥补已经发生的输入舍入。FP16 训练还要关注梯度下溢/溢出与 loss scaling，BF16 则更要关注舍入精度；二者没有普遍的“哪个归一化永远更稳定”结论。参见 [PyTorch 数值精度说明](https://docs.pytorch.org/docs/stable/notes/numerical_accuracy.html) 和 [PyTorch AMP 文档](https://docs.pytorch.org/docs/stable/amp.html)。
 
 ## 参考资料
 
