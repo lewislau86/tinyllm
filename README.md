@@ -6,7 +6,7 @@
 
 | 章节 | 内容 | 状态 |
 | --- | --- | --- |
-| [Chapter 0：Normalization](./chapter0_Normalization/) | LayerNorm、RMSNorm，以及 LLM 中的其他归一化方案 | 文档完成，PyTorch 代码待补充 |
+| [Chapter 0：Normalization](./chapter0_Normalization/) | LayerNorm、RMSNorm、ScaleNorm、QK Norm、DeepNorm 及相关发展 | 教案与 PyTorch 数据实验已完成 |
 
 ## 课程路线（规划）
 
@@ -14,7 +14,7 @@
 
 ### 第一阶段：理解模型怎样计算
 
-1. **Chapter 0 · 归一化**：LayerNorm、RMSNorm、Pre-Norm 与 Post-Norm。
+1. **Chapter 0 · 归一化**：LayerNorm、RMSNorm、ScaleNorm、QK Norm、DeepNorm，以及归一化位置与新变体。
 2. **Chapter 1 · 张量、参数与自动求导**：维度、矩阵乘法、计算图、梯度和参数更新；有 PyTorch 基础的读者可跳读。
 3. **Chapter 2 · 文本、词元化与词表**：Unicode/字节、BPE 的基本思路、特殊 token、编码与解码。
 4. **Chapter 3 · 词嵌入与输出层**：token ID 如何变成向量、输出 logits、权重共享。

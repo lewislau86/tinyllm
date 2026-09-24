@@ -1,23 +1,45 @@
-# TinyLLM 教程 · 第一课：归一化
+# Chapter 0：LLM 中的归一化技术
 
-本课程从零实现一个小型语言模型。第一课先讲清 Transformer 中的归一化：**对什么数做归一化、怎么算、放在哪里，以及为什么要做**。本课先写文档，PyTorch 代码后续补充。
+本章梳理 Transformer/LLM 中有代表性的归一化技术。**LayerNorm、RMSNorm、ScaleNorm、QK Norm、DeepNorm 都是本章的正式主题**。它们解决的问题并不完全相同：有的处理每个 token 的隐藏向量，有的处理注意力中的 query/key，有的调整残差路径。因此应平等学习、按作用位置比较，而不能简单地用一张“谁更先进”的排行榜代替分析。
+
+本章包含理论、PyTorch API 调用示例，以及可逐格运行的固定数据实验 [`ch0.ipynb`](./ch0.ipynb)。notebook 的五个实验小节与下文五种技术逐一对应，每段代码后都解释如何阅读结果。
 
 ## 学习目标
 
-1. 看懂形状为 `[batch, seq_len, hidden_size]` 的张量如何按最后一维归一化。
-2. 手算 LayerNorm 和 RMSNorm，解释二者的差别。
-3. 区分“归一化算法”和“归一化在残差块中的位置”。
-4. 认识 LLM 中的其他相关方案。
+1. 对形状为 `[batch, seq_len, hidden_size]` 的隐藏状态，说清楚归一化沿哪个维度进行。
+2. 能写出 LayerNorm、RMSNorm、ScaleNorm 的公式，解释它们如何改变均值和尺度。
+3. 能说明 QK Norm 改变注意力的哪个环节，以及 DeepNorm 如何处理深层残差块。
+4. 区分归一化**方法**、归一化**位置**与归一化**替代方案**。
 
-## 1. 归一化在处理什么？
+## 统一符号与总览
 
-每个 token 都对应一个含 `d` 个数的隐藏向量。常见的 LayerNorm / RMSNorm 会**独立处理每个 token 的隐藏向量**，在 `hidden_size` 维度上计算统计量；不会把整个 batch 或所有 token 混在一起求均值。归一化有助于控制送入后续层的数值尺度，但训练是否稳定还取决于残差连接、初始化、学习率和数值实现。
+设一个 token 的隐藏向量为 $x=(x_1,\ldots,x_d)$。$d$ 是隐藏维度，$\epsilon>0$ 用来避免除以零。$\gamma$ 表示逐元素可学习缩放，$\beta$ 表示逐元素可学习平移。以下默认对单个 token 的最后一维计算统计量，不跨 batch 或 token 求平均；QK Norm 则在注意力头的维度上处理 query/key。
 
-以下令一个隐藏向量为 $x=(x_1,\ldots,x_d)$，$\epsilon>0$ 是防止分母为零的小常数，$\gamma$ 是可学习的逐元素缩放参数，$\beta$ 是可学习的逐元素平移参数。
+| 技术 | 核心操作 | 主要作用位置 | 关注的问题 | 与其他方法的关系 |
+| --- | --- | --- | --- | --- |
+| [LayerNorm](#1-layernorm) | 减均值，再除以标准差 | 隐藏状态 | 居中和控制尺度 | 可用于 Pre-Norm 或 Post-Norm |
+| [RMSNorm](#2-rmsnorm) | 除以均方根，不减均值 | 隐藏状态 | 控制尺度 | 可用于 Pre-Norm 或 Post-Norm |
+| [ScaleNorm](#3-scalenorm) | 除以向量的 L2 范数，再乘标量 | 隐藏状态 | 控制向量长度 | 是另一种隐藏状态归一化 |
+| [QK Norm](#4-qk-norm) | 分别归一化 query 与 key | 注意力内部 | 控制注意力分数的尺度 | 可与上述隐藏状态归一化共存 |
+| [DeepNorm](#5-deepnorm) | 调整残差分支、归一化与初始化 | Transformer 残差块 | 极深网络的训练稳定性 | 是结构方案，并非单个归一化层的替代品 |
 
-## 2. 两个核心方案
+这张表中的“同等地位”指**教学覆盖程度相同**，并不表示五种技术在模型中能互相替换。例如，使用 RMSNorm 的模型仍可在注意力中加入 QK Norm。
 
-### LayerNorm：先居中，再缩放
+### 哪些架构用过这些方法？
+
+| 方法 | 有明确资料支持的架构或模型 | 需要注意的边界 |
+| --- | --- | --- |
+| LayerNorm | [原始 Transformer](https://arxiv.org/abs/1706.03762)、[BERT](https://arxiv.org/abs/1810.04805)、[GPT-2](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf)、[GPT-3](https://arxiv.org/abs/2005.14165) | 这些模型的归一化放置位置不完全相同；GPT-3 沿用 GPT-2 风格的预归一化。 |
+| RMSNorm | [LLaMA](https://arxiv.org/abs/2302.13971)、[Gemma 2](https://arxiv.org/abs/2408.00118)、[Qwen3](https://arxiv.org/abs/2505.09388) | Gemma 2 在子层前后使用 RMSNorm；Qwen3 同时还在注意力中使用 QK Norm。 |
+| ScaleNorm | [Transformers without Tears](https://arxiv.org/abs/1910.05895) 的机器翻译 Transformer，覆盖 IWSLT/TED 低资源语种对和 WMT'14 英德实验 | 有明确的研究架构和实验，但不宜把它写成 LLaMA、GPT-3 等主流 LLM 的已确认组件。 |
+| QK Norm | [原始 QKNorm 论文](https://aclanthology.org/2020.findings-emnlp.379/) 的机器翻译 Transformer；[Qwen3](https://arxiv.org/abs/2505.09388)、[Gemma 3](https://arxiv.org/abs/2503.19786) | 原论文采用逐头 L2 归一化；后来的 LLM 可采用逐头 RMSNorm。名称相近不代表公式完全相同。 |
+| DeepNorm | [DeepNet](https://arxiv.org/abs/2203.00555) 的极深 Transformer，包括论文中的 200 层多语言翻译模型和最高 1000 层的实验架构 | DeepNorm 是 DeepNet 提出的残差与初始化方案；不能据此说 BERT、GPT 或 LLaMA 的原始架构采用了它。 |
+
+**读表原则：**“论文在某种 Transformer 上验证过”与“某个知名预训练模型正式采用”是不同证据。上表对 ScaleNorm、DeepNorm 使用论文中的研究架构，对 LayerNorm、RMSNorm、QK Norm 列出可核对的公开模型；不把技术名称相似的实现强行视为同一种公式。
+
+## 1. LayerNorm
+
+**做法。**先计算隐藏向量的均值和方差，再居中、缩放，并应用可学习参数：
 
 $$
 \mu=\frac{1}{d}\sum_{i=1}^{d}x_i,\qquad
@@ -28,68 +50,190 @@ $$
 y_i=\gamma_i\frac{x_i-\mu}{\sqrt{\sigma^2+\epsilon}}+\beta_i
 $$
 
-它先减去均值，再按标准差调整尺度。公式中的方差分母为 `d`。常见的 PyTorch `LayerNorm` 默认有 `weight` 和 `bias` 两组可学习参数。
+**作用位置。**常用于 Transformer 子层前或残差相加后；这是 Pre-Norm / Post-Norm 的选择。PyTorch `LayerNorm` 通常默认学习 `weight` 和 `bias`，即 `2d` 个参数，也可以关闭其中的仿射参数。
 
-### RMSNorm：只按均方根缩放
+**目的与取舍。**输出在应用 $\gamma,\beta$ 前均值为零、方差接近一。对所有分量同时加同一个常数时，居中步骤会消除这个偏移。它需要计算均值和方差；实际运行速度取决于内核和硬件，不能只凭算术步骤断言性能。
+
+**代表性应用。**原始 Transformer、BERT、GPT-2 和 GPT-3 使用了 LayerNorm 或其放置方式的变体。GPT-3 不应列在 RMSNorm 代表模型中。
+
+## 2. RMSNorm
+
+**做法。**不减均值，只用输入平方的平均值计算均方根：
 
 $$
-\operatorname{RMS}(x)=\sqrt{\frac{1}{d}\sum_{i=1}^{d}x_i^2+\epsilon},\qquad
-y_i=\gamma_i\frac{x_i}{\operatorname{RMS}(x)}
+\mathrm{RMS}(x)=\sqrt{\frac{1}{d}\sum_{i=1}^{d}x_i^2+\epsilon},\qquad
+y_i=\gamma_i\frac{x_i}{\mathrm{RMS}(x)}
 $$
 
-它不减均值，也不计算围绕均值的方差。常见实现只有 `weight`，没有 `bias`。这里把 $\epsilon$ 放在平方根内；阅读具体模型代码时仍要核对其实现约定。
+**作用位置。**和 LayerNorm 一样，可放在注意力或前馈子层的输入、输出附近。常见形式只有 `d` 个逐元素缩放参数，没有偏置；具体模型代码仍应逐一核对。
 
-### 手算例子
+**目的与取舍。**控制向量尺度，保留均值信息；输出通常不以零为中心。省去居中与方差计算，但不能据此保证任意实现都更快。RMSNorm 论文在其测试的模型和实现中报告约 7%–64% 的速度提升，这不是通用硬件指标。FP16/BF16 的稳定性仍取决于累加精度、$\epsilon$ 和内核。
 
-取 $x=[1,2,3]$，暂设 $\epsilon=0$、$\gamma=[1,1,1]$、$\beta=[0,0,0]$：
+**代表性应用。**LLaMA 系列使用 Pre-Norm + RMSNorm；Gemma 2 同时在子层前后使用 RMSNorm。
 
-- LayerNorm：均值 $\mu=2$，方差 $\sigma^2=2/3$，输出约为 $[-1.225,0,1.225]$。
-- RMSNorm：均方根 $\sqrt{14/3}\approx2.160$，输出约为 $[0.463,0.926,1.389]$。
+## 3. ScaleNorm
 
-这组数展示了关键区别：**RMSNorm 的输出通常不以 0 为中心**。真实计算必须保留正的 $\epsilon$，以处理全零向量等情况。
+**做法。**用向量的 L2 范数归一化，再乘可学习标量 $g$：
 
-### 对比表
+$$
+\|x\|_2=\sqrt{\sum_{i=1}^{d}x_i^2},\qquad
+y=g\frac{x}{\|x\|_2+\epsilon}
+$$
 
-| 特性 | LayerNorm | RMSNorm |
+**作用位置。**作为隐藏状态归一化，可用于 Transformer 子层周围。它的 $g$ 是**一个标量**，不像 LayerNorm/RMSNorm 的 $\gamma$ 是逐维参数。原论文还讨论了其他配套初始化和输出归一化设计，不能把整篇论文的效果全归因于 ScaleNorm。
+
+**目的与取舍。**直接约束向量长度，形式简洁。不减均值，也不会像逐维 $\gamma$ 一样单独学习每个特征的缩放。$\epsilon$ 的放置和 $g$ 的共享方式要以具体实现为准；上式是便于教学的安全形式。
+
+**代表性研究。**《Transformers without Tears》在 Transformer 实验中研究了 ScaleNorm。
+
+## 4. QK Norm
+
+**做法。**对注意力头中的 query 和 key 分别归一化，然后再计算注意力分数。以 L2 版本为例：
+
+$$
+\widehat q=\frac{q}{\|q\|_2+\epsilon},\qquad
+\widehat k=\frac{k}{\|k\|_2+\epsilon},\qquad
+s(q,k)=g\,\widehat q^{\mathsf T}\widehat k
+$$
+
+接着对所有允许关注的 key 的分数做 softmax。原始 QKNorm 论文使用 L2 归一化和可学习尺度，代替固定的 $1/\sqrt{d_k}$ 缩放。**QK Norm 是方法家族，不限于这一种公式**：一些较新的模型对每个注意力头的 Q/K 使用 RMSNorm，具体缩放和 RoPE 的先后顺序须看模型实现。
+
+**作用位置。**注意力内部、Q/K 投影之后、点积之前。它不负责归一化残差流中的隐藏状态，因此可与 LayerNorm、RMSNorm 或 ScaleNorm 同时出现。
+
+**目的与取舍。**控制 query/key 范数和注意力 logits 的尺度，降低 softmax 因分数过大而饱和的风险。归一化可能改变注意力表达方式，并增加计算；不能只看名称就断言效果一定更好。
+
+**代表性研究与应用。**原始 QKNorm 论文研究了该方法；Qwen3 技术报告也把 QK-Norm 列为架构修改之一，但具体实现与原论文形式不必相同。
+
+## 5. DeepNorm
+
+**做法。**调整残差分支的比例，同时配套特殊初始化。用 $F$ 表示一个 Transformer 子层，其核心结构可概括为：
+
+$$
+x_{\mathrm{next}}=\mathrm{LayerNorm}(\alpha x+F(x))
+$$
+
+$\alpha$ 以及部分权重初始化的缩放系数由网络结构和深度确定。只复制上式而不采用配套初始化，并不等于完整实现了 DeepNorm。
+
+**作用位置。**整个残差块，而非单个 token 向量的独立归一化公式。它保留了 LayerNorm，同时改变残差路径与初始化。
+
+**目的与取舍。**面向非常深的 Transformer，缓解训练时更新过大或不稳定的问题。它引入结构和初始化约束，不能与“换成 RMSNorm”视作同一操作。
+
+**代表性研究。**《DeepNet: Scaling Transformers to 1,000 Layers》验证了该方案在极深 Transformer 中的作用。
+
+## 6. 其他值得了解的发展
+
+下面每项都关系到归一化设计，但与前五项的作用层次不同；后续可扩为独立课程实验。
+
+| 方案 | 要点 | 与本章五项的关系 |
 | --- | --- | --- |
-| 归一化统计量 | 均值、围绕均值的方差 | 输入平方的均值，即均方根 |
-| 是否减均值 | 是 | 否 |
-| 常见可学习参数 | $\gamma$ 和 $\beta$，各 `d` 个 | $\gamma$，`d` 个 |
-| 计算步骤 | 求均值 → 减均值 → 求方差 → 缩放和平移 | 求平方均值 → 缩放 |
-| 计算性能 | 需计算均值及方差 | 算术步骤更少；实际速度取决于实现和硬件 |
-| 混合精度 | 需要妥善处理统计量计算精度 | 同样需要妥善处理平方、累加和 $\epsilon$ |
-| 代表性模型 | BERT、GPT-2、GPT-3 | LLaMA 系列等 |
+| pRMSNorm | 从部分维度估计 RMS | RMSNorm 原论文提出的近似变体；减少统计量计算，但会引入估计误差 |
+| NormFormer | 在注意力后、注意力头输出和前馈层内部增加归一化或缩放 | 调整归一化数量与位置的架构方案，可与基础归一化层结合 |
+| Pre-Norm / Post-Norm | 分别在子层前或残差相加后归一化 | 是**位置选择**，不是新的统计公式 |
+| Sandwich Norm / 双侧归一化 | 在子层前后都放归一化层 | 是**层的布置方式**；Gemma 2 是使用前后 RMSNorm 的实例 |
+| DyT（Dynamic Tanh） | 用带可学习参数的 tanh 操作替代归一化层 | 是**归一化替代方案**，本身不计算均值、方差或范数 |
 
-**不要把 RMSNorm 的“步骤更少”理解为任何设备、任何模型上都固定快某个百分比。**原始论文报告在其不同模型和实现中观察到约 7%–64% 的加速；这不是本项目的性能承诺。也不能简单说 LayerNorm 在 FP16 下必然不稳定、RMSNorm 在 BF16 下必然稳定：两者都要留意累加精度、$\epsilon$ 和具体内核。
+BatchNorm 也是重要的深度学习方法，但它对 batch 的依赖及训练/推理统计量处理与这里的逐 token 隐藏状态归一化不同，本章不将其作为 LLM 主线。近年的论文仍不断提出新变体；本章覆盖有明确原始论文或代表模型证据、且能帮助理解 TinyLLM 设计的主要方案，并非宣称穷尽所有论文。
 
-## 3. 还有其他归一化方案吗？
+## 7. 两个容易混淆的维度
 
-有。本课程先掌握上面两种最常见的隐藏状态归一化，再认识这些方案：
-
-| 名称 | 核心想法 | 与本课主线的关系 |
-| --- | --- | --- |
-| ScaleNorm | 用向量的 $\ell_2$ 范数和一个可学习尺度归一化 | 是另一种替代 LayerNorm 的向量归一化 |
-| QK Norm | 在注意力计算中归一化 query 和 key | 作用于注意力内部的 Q/K，位置不同于残差流上的 LayerNorm/RMSNorm |
-| DeepNorm | 调整深层 Transformer 的残差连接、归一化和初始化 | 面向极深网络的结构方案，不只是替换一个公式 |
-
-这些方案说明“LLM 归一化”并非只有两种，但也不是都要放入 TinyLLM 的第一个实现。BatchNorm 在深度学习中很重要；它跨 batch 统计的做法与本课逐 token 的隐藏向量归一化不同，因此仅作为背景知识。
-
-## 4. 归一化放在哪里？
-
-**Pre-Norm / Post-Norm 说的是位置，LayerNorm / RMSNorm 说的是算法。**设 $F$ 是注意力层或前馈层：
+**方法决定怎么算，位置决定在哪里算。**设 $F$ 是注意力层或前馈层，`Norm` 可以是适用的隐藏状态归一化层：
 
 ```text
 Pre-Norm:   output = x + F(Norm(x))
 Post-Norm:  output = Norm(x + F(x))
 ```
 
-例如，LLaMA 使用 **Pre-Norm + RMSNorm**。不要把 Pre-Norm 当作第三种与 RMSNorm 并列的计算公式。一个 Transformer block 通常有注意力和前馈两个子层，两处都需要明确归一化位置；模型末尾还可能有额外的归一化层。
+QK Norm 插在 $F$ 的注意力内部，不属于上面 `Norm(x)` 的同一个位置。DeepNorm 改写残差块并配合初始化。实际模型可以同时包含多种方案，不能只用一个词概括整套归一化设计。
 
-## 5. 后续 PyTorch 代码要做的实验
+**手算检查。**取 $x=[1,2,3]$，仅为方便计算暂设 $\epsilon=0$，并令缩放参数为 1、平移参数为 0：
 
-1. 手写 LayerNorm 与 RMSNorm，并与 PyTorch 对应模块比较输出和梯度。
-2. 用 `[batch, seq_len, hidden_size]` 张量确认只在最后一维计算统计量。
-3. 比较有偏移的输入、全零输入及不同数据类型下的结果；性能测试记录设备、dtype、形状和实现方式，再讨论速度。
+- LayerNorm：均值为 2，方差为 $2/3$，输出约为 $[-1.225,0,1.225]$。
+- RMSNorm：均方根为 $\sqrt{14/3}$，输出约为 $[0.463,0.926,1.389]$。
+- ScaleNorm：L2 范数为 $\sqrt{14}$，输出约为 $[0.267,0.535,0.802]$。
+
+真实实现必须保留正的 $\epsilon$，尤其要处理全零向量。QK Norm 需要成对的 query/key 才能展示；DeepNorm 需要残差子层与初始化才有意义，不能硬塞进这个单向量算例。
+
+## 8. 常用方案与 PyTorch 调用
+
+**在入门代码和常见 LLM 架构中，LayerNorm 与 RMSNorm 是最常见的隐藏状态归一化层。**QK Norm 用于需要额外控制注意力分数的架构；ScaleNorm 和 DeepNorm 是需要理解的研究方案，选用时要连同论文的结构与训练设定一起评估。这里说的是使用频率，不是教学重要性：本章五种方法都应掌握。预训练模型应遵守其原本架构，不能仅因为某种方法“更常用”就替换权重对应的归一化层。
+
+下面的例子只演示 API 与张量维度。输入 `x` 为 `[batch, seq_len, hidden_size]`；`nn.LayerNorm(d)` 和 `nn.RMSNorm(d)` 都作用于最后一维。PyTorch 2.11 中有这两个内置模块，实际项目仍应核对所用版本。
+
+```python
+import torch
+from torch import nn
+from torch.nn import functional as F
+
+batch, seq_len, d = 2, 4, 8
+x = torch.randn(batch, seq_len, d)
+
+# LayerNorm：逐 token 计算均值和方差；默认有 weight 和 bias。
+layer_norm = nn.LayerNorm(d, eps=1e-5)
+y_ln = layer_norm(x)
+
+# RMSNorm：逐 token 计算均方根；默认只有 weight。
+rms_norm = nn.RMSNorm(d, eps=1e-5)
+y_rms = rms_norm(x)
+
+# ScaleNorm：PyTorch 无同名标准模块，用基础算子组合。
+# 一个可学习标量 g；此处将其初值设为 sqrt(d)。
+g = nn.Parameter(torch.tensor(d**0.5))
+y_scale = g * x / x.norm(p=2, dim=-1, keepdim=True).clamp_min(1e-6)
+
+assert y_ln.shape == y_rms.shape == y_scale.shape == x.shape
+```
+
+`F.normalize(x, p=2, dim=-1, eps=1e-6)` 也可完成 L2 归一化；**一定写 `dim=-1`**，因为其默认维度是 `1`。它使用 `max(norm, eps)` 防止除零，与前面教学公式的 `norm + eps` 在接近零时不完全相同。
+
+QK Norm 没有一个统一的 PyTorch `nn.QKNorm` 标准模块。以下是原始论文思路的**L2 版本示意**。`q/k/v` 的形状是 `[batch, heads, seq_len, head_dim]`。`scaled_dot_product_attention` 的 `scale` 参数只接受 Python 数值，不能直接传可学习的 `Parameter`；因此先把 $g$ 乘到 query 上，再指定 `scale=1.0`，避免函数默认再乘一次 $1/\sqrt{d_k}$。
+
+```python
+heads, head_dim = 2, 4
+q = torch.randn(batch, heads, seq_len, head_dim)
+k = torch.randn(batch, heads, seq_len, head_dim)
+v = torch.randn(batch, heads, seq_len, head_dim)
+
+q_unit = F.normalize(q, p=2, dim=-1, eps=1e-6)
+k_unit = F.normalize(k, p=2, dim=-1, eps=1e-6)
+g_qk = nn.Parameter(torch.tensor(head_dim**0.5))
+attention_out = F.scaled_dot_product_attention(
+    q_unit * g_qk, k_unit, v, is_causal=True, scale=1.0
+)
+assert attention_out.shape == q.shape
+```
+
+有些模型采用**逐头 RMSNorm 版 QK Norm**，那应分别对 `q`、`k` 的最后一维使用 `nn.RMSNorm(head_dim)`；它与上面的 L2 版本不完全等价。RoPE、缩放参数和归一化的先后顺序应按目标模型实现核对。
+
+DeepNorm 也没有一个单独的 `nn.DeepNorm` 调用。`nn.LayerNorm(d)(alpha * x + F_sub(x))` 只能表达其残差块的一个局部形式；真正的 DeepNorm 还必须根据网络深度、编码器/解码器结构设置 $\alpha$ 和配套的权重初始化。**不要把一个任意 `alpha` 加到残差上就称为完整 DeepNorm。**
+
+## 9. 动手实验：看归一化前后发生了什么
+
+打开 [`ch0.ipynb`](./ch0.ipynb)，选择安装了 PyTorch 的 Python 内核，从上到下运行所有单元格。本实验在 PyTorch 2.11.0 上运行通过，使用固定输入，不需要下载数据或训练模型。notebook 逐项打印原始向量、输出向量及最后一维的 `mean`、`RMS`、`L2`，并提供读数说明和练习。输入形状为 `[1, 4, 4]`，即一个 batch、四个 token、每个 token 四个特征。
+
+| 实验 | 输入 | 应观察到什么 |
+| --- | --- | --- |
+| LayerNorm | `[1,2,3,4]` 与整体加 10 后的 `[11,12,13,14]` | 两行归一化输出相同，均值约为 0；说明它消除了整体平移 |
+| RMSNorm | 同上 | 两行输出不同，均方根约为 1，输出均值通常不为 0 |
+| ScaleNorm | 同上，固定 `g=1` | 非零输入的 L2 长度约为 1，但均值不被强制变为 0 |
+| 全零向量 | `[0,0,0,0]` | 三种输出均为有限的零向量；观察 `eps` 防止除零 |
+| QK Norm | 长度差异很大的两个 Q/K 向量 | 原始 `QK` 最大分数为 100；L2 归一化后最大分数为 1，并改变 softmax 概率 |
+| DeepNorm 残差示意 | 相同 `x` 和分支输出，比较 `alpha=1` 与 `alpha=1.5` | 改变残差输入相加前的比例，会改变 LayerNorm 的输入与输出；`1.5` 只是演示值，不是论文系数 |
+
+**读数提示：**非零输入经过默认 LayerNorm 后的 RMS 约为 1；经过默认 RMSNorm 后的 RMS 约为 1；经过 `g=1` 的 ScaleNorm 后的 **L2** 约为 1。这三个“约为 1”对应不同统计量，不能混为一谈。全零向量是例外。`eps` 会使数值略偏离 1，学到的 `weight/bias` 也会改变这些输出性质。
+
+### PyTorch 函数与参数速查
+
+| 调用 | 本实验中的参数 | 参数含义与常见坑 |
+| --- | --- | --- |
+| `nn.LayerNorm(normalized_shape=d, eps=1e-5)` | `d=4`；默认 `elementwise_affine=True, bias=True` | 整数 `d` 表示只归一化最后一维；`eps` 加在方差上；默认有形状为 `[d]` 的 `weight` 和 `bias`。`bias=False` 只关闭偏置，`elementwise_affine=False` 同时关闭可学习仿射参数。 |
+| `nn.RMSNorm(normalized_shape=d, eps=1e-5)` | `d=4`；默认 `elementwise_affine=True` | 只归一化最后一维；默认有 `[d]` 的 `weight`，没有 `bias` 参数。PyTorch 默认 `eps=None`，实际值由计算 dtype 决定；本课显式设为 `1e-5`，便于比较。 |
+| `F.normalize(x, p=2, dim=-1, eps=1e-6)` | `p=2` 为 L2；`dim=-1` 为隐藏维度 | `F.normalize` 的默认 `dim=1`，对 `[batch, seq, hidden]` 会沿 **seq** 而非 hidden 归一化，所以这里必须显式传 `-1`；计算为 `x / max(L2(x), eps)`。 |
+| `x.norm(p=2, dim=-1, keepdim=True)` | `keepdim=True` | 得到 `[batch, seq, 1]` 范数，便于广播回原向量；`clamp_min(1e-6)` 避免零分母。 |
+| `F.scaled_dot_product_attention(q, k, v, is_causal=False, scale=1.0)` | Q/K/V 为 `[batch, heads, seq, head_dim]` | 返回注意力加权后的 V，**不返回 logits 或概率矩阵**；实验单独用矩阵乘法打印 logits。默认 `scale` 为 $1/\sqrt{d_k}$，这里显式设 `1.0` 以观察归一化的影响。自回归注意力应设置 `is_causal=True`。 |
+
+可学习参数可用 `module.named_parameters()` 查看。notebook 会打印 LayerNorm 的 `weight/bias` 和 RMSNorm 的 `weight`。`F.normalize` 与 `Tensor.norm` 本身不创建参数；ScaleNorm 的标量 `g` 要作为 `nn.Parameter` 注册在模型里。前面 API 示例展示了这种写法，notebook 为便于对照把 `g` 固定为 1。
+
+**实验边界：**QK Norm 演示使用 L2 版本；DeepNorm 演示仅展示残差公式中的 $\alpha$，没有构建完整深层网络和论文初始化。之后若比较训练稳定性与速度，应在相同数据、深度、dtype、设备和计时方式下做专门实验。
 
 ## 参考资料
 
@@ -98,6 +242,11 @@ Post-Norm:  output = Norm(x + F(x))
 - [Transformers without Tears：ScaleNorm，Nguyen 与 Salazar，2019](https://arxiv.org/abs/1910.05895)
 - [Query-Key Normalization for Transformers，Henry 等，2020](https://aclanthology.org/2020.findings-emnlp.379/)
 - [DeepNet：DeepNorm，Wang 等，2022](https://arxiv.org/abs/2203.00555)
+- [NormFormer，Shleifer 等，2021](https://arxiv.org/abs/2110.09456)
+- [Transformers without Normalization：DyT，Zhu 等，2025](https://arxiv.org/abs/2503.10622)
 - [LLaMA 论文，Touvron 等，2023](https://arxiv.org/abs/2302.13971)
 - [GPT-3 论文，Brown 等，2020](https://arxiv.org/abs/2005.14165)
+- [Gemma 2 技术报告，2024](https://arxiv.org/abs/2408.00118)
+- [Qwen3 技术报告，2025](https://arxiv.org/abs/2505.09388)
 - [PyTorch LayerNorm 文档](https://docs.pytorch.org/docs/stable/generated/torch.nn.LayerNorm.html) · [PyTorch RMSNorm 文档](https://docs.pytorch.org/docs/stable/generated/torch.nn.RMSNorm.html)
+- [PyTorch `F.normalize` 文档](https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.normalize.html) · [PyTorch `scaled_dot_product_attention` 文档](https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html)
