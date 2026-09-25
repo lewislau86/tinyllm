@@ -2,7 +2,7 @@
 
 本章梳理 Transformer/LLM 中有代表性的归一化技术。**LayerNorm、RMSNorm、ScaleNorm、QK Norm、DeepNorm 都是本章的正式主题**。它们解决的问题并不完全相同：有的处理每个 token 的隐藏向量，有的处理注意力中的 query/key，有的调整残差路径。因此应平等学习、按作用位置比较，而不能简单地用一张“谁更先进”的排行榜代替分析。
 
-本章包含理论、PyTorch API 调用示例，以及可逐格运行的固定数据实验 [`ch0.ipynb`](./ch0.ipynb)。notebook 的五个实验小节与下文五种技术逐一对应，每段代码后都解释如何阅读结果。
+本章包含理论、PyTorch API 调用示例，以及可逐格运行的 [`ch0.ipynb`](./ch0.ipynb)。notebook 既有固定数据实验，也有五种方法的教学版实现；每段代码后都解释如何阅读结果。
 
 ## 学习目标
 
@@ -10,6 +10,18 @@
 2. 能写出 LayerNorm、RMSNorm、ScaleNorm 的公式，解释它们如何改变均值和尺度。
 3. 能说明 QK Norm 改变注意力的哪个环节，以及 DeepNorm 如何处理深层残差块。
 4. 区分归一化**方法**、归一化**位置**与归一化**替代方案**。
+
+## 配合阅读的交互演示
+
+这些网页可以直接在浏览器里操作。它们用于建立直觉；本章公式与 [`ch0.ipynb`](./ch0.ipynb) 才是核对具体数值和 PyTorch 实现的依据。
+
+| 演示 | 建议怎样看 | 对应本章 |
+| --- | --- | --- |
+| [Layer Normalization & RMSNorm 交互演示](https://continuousfunction.ai/domains/attention-transformers/layer-normalization/) | 改动输入向量，观察“先减均值”与“直接按均方根缩放”如何改变输出；特别试试所有分量同时加一个常数。 | 第 1、2 节及 notebook 的平移实验 |
+| [Transformer Explainer](https://poloclub.github.io/transformer-explainer/) | 沿着一个 token 的计算路径找到归一化与注意力模块的位置，先建立整体结构印象。该工具展示的是 GPT-2 架构，不代表所有现代模型都采用同一种归一化。 | 第 7 节的 Block 位置图 |
+| [Transformer Attention Playground](https://www.rugvailabs.com/play/transformer) | 观察 Q/K 点积、softmax 和加权 V 的变化，再回到第 4 节理解为什么要在点积前控制 Q/K 的尺度。它演示注意力计算，并不直接实现本章所有 QK Norm 变体。 | 第 4 节 QK Norm |
+
+建议顺序：先看 LayerNorm/RMSNorm 的向量变化，再在 Transformer Explainer 中定位模块，最后看 Q/K 如何影响 softmax。网页交互会随网站更新；如果页面无法访问，notebook 中的固定数据实验仍可独立运行。
 
 ## 统一符号与总览
 
@@ -32,7 +44,7 @@
 | LayerNorm | [原始 Transformer](https://arxiv.org/abs/1706.03762)、[BERT](https://arxiv.org/abs/1810.04805)、[GPT-2](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf)、[GPT-3](https://arxiv.org/abs/2005.14165) | 这些模型的归一化放置位置不完全相同；GPT-3 沿用 GPT-2 风格的预归一化。 |
 | RMSNorm | [LLaMA](https://arxiv.org/abs/2302.13971)、[Gemma 2](https://arxiv.org/abs/2408.00118)、[Qwen3](https://arxiv.org/abs/2505.09388) | Gemma 2 在子层前后使用 RMSNorm；Qwen3 同时还在注意力中使用 QK Norm。 |
 | ScaleNorm | [Transformers without Tears](https://arxiv.org/abs/1910.05895) 的机器翻译 Transformer，覆盖 IWSLT/TED 低资源语种对和 WMT'14 英德实验 | 有明确的研究架构和实验，但不宜把它写成 LLaMA、GPT-3 等主流 LLM 的已确认组件。 |
-| QK Norm | [原始 QKNorm 论文](https://aclanthology.org/2020.findings-emnlp.379/) 的机器翻译 Transformer；[Qwen3](https://arxiv.org/abs/2505.09388)、[Gemma 3](https://arxiv.org/abs/2503.19786) | 原论文采用逐头 L2 归一化；后来的 LLM 可采用逐头 RMSNorm。名称相近不代表公式完全相同。 |
+| QK Norm | [原始 QKNorm 论文](https://aclanthology.org/2020.findings-emnlp.379/) 的机器翻译 Transformer；[OLMo 2/3、Qwen 3、Gemma 3、Marin 32B](https://allenai.org/papers/olmpool) | 原论文采用逐头 L2 归一化；现代 LLM 常用 RMSNorm，且有整层投影与逐头两种粒度。名称相近不代表公式完全相同。 |
 | DeepNorm | [DeepNet](https://arxiv.org/abs/2203.00555) 的极深 Transformer，包括论文中的 200 层多语言翻译模型和最高 1000 层的实验架构 | DeepNorm 是 DeepNet 提出的残差与初始化方案；不能据此说 BERT、GPT 或 LLaMA 的原始架构采用了它。 |
 
 **读表原则：**“论文在某种 Transformer 上验证过”与“某个知名预训练模型正式采用”是不同证据。上表对 ScaleNorm、DeepNorm 使用论文中的研究架构，对 LayerNorm、RMSNorm、QK Norm 列出可核对的公开模型；不把技术名称相似的实现强行视为同一种公式。
@@ -102,6 +114,15 @@ y = rms_norm(x)              # 输出形状仍为 [batch, seq, d]
 
 **代表性应用。**LLaMA 系列使用 Pre-Norm + RMSNorm；Gemma 2 同时在子层前后使用 RMSNorm。
 
+### LayerNorm 与 RMSNorm 的并行计算差别
+
+**两者都可以高度并行**：不同 token 的隐藏向量彼此独立，同一向量内的求和也可做并行归约（reduction）。差别主要在每个向量内部所需的统计量与运算依赖：
+
+- **LayerNorm** 要得到均值，再计算围绕均值的方差（或用等价的统计量计算方式），随后居中、缩放。它涉及均值相关的额外运算和依赖，因此算子实现通常更复杂。
+- **RMSNorm** 直接对输入的平方求平均并开方，不做减均值和中心化方差。它少了一套均值相关的运算与数据依赖，通常有机会减少计算、数据读写和归约同步开销。
+
+这解释了 RMSNorm **可能更省**的来源，而不是说 LayerNorm 无法并行，也不是保证 RMSNorm 在所有设备上都更快。融合内核、输入形状、dtype 和硬件会决定实际开销；上面提到的论文速度结果只适用于其测试设置。参见 [RMSNorm 原论文](https://arxiv.org/abs/1910.07467)。
+
 ## 3. ScaleNorm
 
 **做法。**用向量的 L2 范数归一化，再乘可学习标量 $g$：
@@ -143,7 +164,16 @@ y = ScaleNorm()(x)            # x 和 y 都是 [batch, seq, d]
 
 ## 4. QK Norm
 
-**做法。**对注意力头中的 query 和 key 分别归一化，然后再计算注意力分数。以 L2 版本为例：
+**核心问题。**注意力分数（attention logits）由 Q 与 K 的点积得到。若 Q/K 的范数变大，分数可能过大或波动很大，使 softmax 过度饱和：某些 key 的权重接近 1，其余接近 0。这可能增加训练不稳定的风险。QK Norm 在点积前控制 Q/K 的尺度，专门处理**注意力内部**的数值；LayerNorm/RMSNorm 通常处理 Transformer 主干的 hidden state，两者可以同时使用。[原始 QKNorm 论文](https://aclanthology.org/2020.findings-emnlp.379/) 和 [OlmPool 架构研究](https://allenai.org/papers/olmpool) 分别讨论了 softmax 饱和与训练稳定性。
+
+**两种常见粒度。**这里的“layerwise”不是跨 batch 或跨 token 求统计量，而是对**每个 token 投影得到的整条 Q 或 K 向量**归一化；“headwise”先拆成注意力头，再分别归一化每个头的向量。
+
+| 粒度 | 归一化沿哪个维度 | 公开模型例子 |
+| --- | --- | --- |
+| Layerwise QK Norm（整层投影） | 对每个 token 的 Q/K 拼接投影宽度求 RMS，再拆为各头 | [OLMo 2、OLMo 3](https://allenai.org/papers/olmpool) |
+| Headwise QK Norm（逐头） | 拆头后，分别对每个头的 `head_dim` 求 RMS | [Qwen 3、Gemma 3、Marin 32B](https://allenai.org/papers/olmpool) |
+
+**做法。**下面先用原始论文的**逐头 L2 版本**说明基本机制；上表现代模型中的 RMSNorm 版本不应直接等同于这个公式：
 
 $$
 \widehat q=\frac{q}{\|q\|_2+\epsilon},\qquad
@@ -151,7 +181,7 @@ $$
 s(q,k)=g\,\widehat q^{\mathsf T}\widehat k
 $$
 
-接着对所有允许关注的 key 的分数做 softmax。原始 QKNorm 论文使用 L2 归一化和可学习尺度，代替固定的 $1/\sqrt{d_k}$ 缩放。**QK Norm 是方法家族，不限于这一种公式**：一些较新的模型对每个注意力头的 Q/K 使用 RMSNorm，具体缩放和 RoPE 的先后顺序须看模型实现。
+接着对所有允许关注的 key 的分数做 softmax。原始 QKNorm 论文使用 L2 归一化和可学习尺度，代替固定的 $1/\sqrt{d_k}$ 缩放。**QK Norm 是方法家族，不限于这一种公式**：当前模型可用整层或逐头的 RMSNorm，且缩放、RoPE 与归一化的先后顺序须看具体实现。
 
 **参数中文说明。**$q$ 是一个 query 向量，$k$ 是一个 key 向量，$d_k$ 是每个注意力头的特征维度；$\widehat q$ 和 $\widehat k$ 是归一化后的向量；$g$ 是调节注意力分数幅度的可学习尺度，$s(q,k)$ 是进入 softmax 前的分数。$\epsilon$ 防止零向量除零。这里的 L2 公式只是 QK Norm 的一种具体形式。
 
@@ -176,13 +206,13 @@ out = F.scaled_dot_product_attention(
 )
 ```
 
-这里的 `logits/probs` 便于教学观察；注意力函数直接返回加权后的 `out`。逐头 RMSNorm 版本可改用 `nn.RMSNorm(head_dim)` 处理 Q/K，但应遵守目标模型的具体顺序。参见 [PyTorch 注意力函数文档](https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html)。
+这里的 `logits/probs` 便于教学观察；注意力函数直接返回加权后的 `out`。逐头 RMSNorm 版本可在拆头后用 `nn.RMSNorm(head_dim)` 分别处理 Q/K；整层投影版本则应在拆头前，对 Q/K 各自的**完整投影宽度**应用 RMSNorm。两者的统计维度不同，不能只改模块名称。具体模型的 Q/K 投影宽度、权重形状与 RoPE 顺序仍须核对。参见 [PyTorch 注意力函数文档](https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html)。
 
 **作用位置。**注意力内部、Q/K 投影之后、点积之前。它不负责归一化残差流中的隐藏状态，因此可与 LayerNorm、RMSNorm 或 ScaleNorm 同时出现。
 
-**目的与取舍。**控制 query/key 范数和注意力 logits 的尺度，降低 softmax 因分数过大而饱和的风险。归一化可能改变注意力表达方式，并增加计算；不能只看名称就断言效果一定更好。
+**目的与取舍。**控制 query/key 范数和注意力 logits 的尺度，降低 softmax 因分数过大而饱和及训练不稳定的风险。它也改变注意力的表达方式，并增加计算。[OlmPool](https://allenai.org/papers/olmpool) 的受控实验发现 QK Norm 有助于稳定训练，但在其长上下文扩展实验中损害了部分效果；逐头版本的影响也与整层版本不同。因此需要结合训练稳定性和目标上下文长度评估，不能只因“更稳定”就默认采用。
 
-**代表性研究与应用。**原始 QKNorm 论文研究了该方法；Qwen3 技术报告也把 QK-Norm 列为架构修改之一，但具体实现与原论文形式不必相同。
+**代表性研究与应用。**原始 QKNorm 论文使用逐头 L2 归一化；现代公开模型中的整层/逐头 RMSNorm 实例见上表。[Qwen3 技术报告](https://arxiv.org/abs/2505.09388) 也把 QK Norm 列为架构修改之一。
 
 ## 5. DeepNorm
 
@@ -210,7 +240,7 @@ y = norm(alpha * x + branch) # 先缩放残差、相加，再归一化
 
 完整 DeepNorm 还要求按 [DeepNet 论文](https://arxiv.org/abs/2203.00555) 为相应编码器/解码器设置 `alpha` 和线性层初始化；单独调用 `nn.LayerNorm` 不能代表整个方案。
 
-对 **decoder-only、共 $M$ 个 Transformer 层** 的情况，论文给出 $\alpha=(2M)^{1/4}$、初始化缩放 $\beta=(8M)^{-1/4}$。先对层权重做标准初始化（论文举 Xavier 为例），再用 $\beta$ 缩放前馈网络的权重，以及注意力的 value 投影和 output 投影权重；query/key 投影不在这份指定清单内。编码器或 encoder-decoder 的系数不同，不能套用这组公式。计算、初始化时机和被缩放的权重清单见 [DeepNet 论文第 4.3 节](https://arxiv.org/pdf/2203.00555)。[`ch0.ipynb`](./ch0.ipynb) 会计算给定 $M$ 的系数并对小模块做一次初始化演示；这仍不是深层训练效果验证。
+对 **decoder-only、共 $M$ 个 Transformer 层** 的情况，论文给出 $\alpha=(2M)^{1/4}$、初始化缩放 $\beta=(8M)^{-1/4}$。先对层权重做标准初始化（论文举 Xavier 为例），再用 $\beta$ 缩放前馈网络的权重，以及注意力的 value 投影和 output 投影权重；query/key 投影不在这份指定清单内。编码器或 encoder-decoder 的系数不同，不能套用这组公式。计算、初始化时机和被缩放的权重清单见 [DeepNet 论文第 4.3 节](https://arxiv.org/pdf/2203.00555)。[`ch0.ipynb`](./ch0.ipynb) 会计算给定 $M$ 的系数，并构造一个带因果注意力和前馈层的小型 decoder-only Block；这仍不是深层训练效果验证。
 
 **作用位置。**整个残差块，而非单个 token 向量的独立归一化公式。它保留了 LayerNorm，同时改变残差路径与初始化。
 
@@ -359,7 +389,7 @@ notebook 还提供完整的 **输入平移/正数缩放对照**、**decoder-only
 
 可学习参数可用 `module.named_parameters()` 查看。notebook 会打印 LayerNorm 的 `weight/bias` 和 RMSNorm 的 `weight`。`F.normalize` 与 `Tensor.norm` 本身不创建参数；ScaleNorm 的标量 `g` 要作为 `nn.Parameter` 注册在模型里。前面 API 示例展示了这种写法，notebook 为便于对照把 `g` 固定为 1。
 
-**实验边界：**QK Norm 演示使用 L2 版本；DeepNorm 演示仅展示残差公式中的 $\alpha$，没有构建完整深层网络和论文初始化。之后若比较训练稳定性与速度，应在相同数据、深度、dtype、设备和计时方式下做专门实验。
+**实验边界：**QK Norm 演示使用 L2 版本；DeepNorm 先用任意 $\alpha$ 展示局部残差变化，随后在第 10 节按论文的 decoder-only 系数与初始化构造小型 Block。notebook 没有训练完整深层网络。之后若比较训练稳定性与速度，应在相同数据、深度、dtype、设备和计时方式下做专门实验。
 
 ## 10. BF16/FP16 对归一化有什么影响？
 
@@ -376,6 +406,20 @@ notebook 还提供完整的 **输入平移/正数缩放对照**、**decoder-only
 notebook 分别演示三类情况：① FP16 对微小值的舍入/下溢，② BF16 在较大基数上丢失微小差异，③ 先在低精度中平方与先转成 FP32 再平方的差别。最后比较 `nn.LayerNorm`、`nn.RMSNorm` 在 FP32/FP16/BF16 输入上的输出与 FP32 参考结果。**差异不能一概归因于公式**：输入一旦转换成低精度并丢失信息，后续转回 FP32 也无法恢复。
 
 实际训练中常用混合精度，并由框架/内核决定某些统计计算的更高精度路径。若自己手写归一化，可明确采用 `x.float()` 计算均值或平方均值、除法，再按需要转回输入 dtype；这只保护转换之后的计算，不能弥补已经发生的输入舍入。FP16 训练还要关注梯度下溢/溢出与 loss scaling，BF16 则更要关注舍入精度；二者没有普遍的“哪个归一化永远更稳定”结论。参见 [PyTorch 数值精度说明](https://docs.pytorch.org/docs/stable/notes/numerical_accuracy.html) 和 [PyTorch AMP 文档](https://docs.pytorch.org/docs/stable/amp.html)。
+
+## 11. 五种方法的教学版实现
+
+[`ch0.ipynb` 第 10 节](./ch0.ipynb) 将公式写成可运行的 `nn.Module`：
+
+| 方法 | 教学实现中的关键步骤 | 检查方式 |
+| --- | --- | --- |
+| LayerNorm | `mean → 减均值 → 方差 → rsqrt → weight/bias` | 与 `nn.LayerNorm` 比较输出、输入梯度和参数梯度 |
+| RMSNorm | `平方均值 → rsqrt → weight` | 与 `nn.RMSNorm` 比较输出、输入梯度和参数梯度 |
+| ScaleNorm | `L2 范数 → 除以长度 → 乘可学习标量 g` | 检查非零向量长度、零向量和 `g` 的梯度 |
+| QK Norm | 逐头归一化 Q/K → `QKᵀ` → softmax → 加权 V | 与 `F.scaled_dot_product_attention` 对照输出并检查梯度 |
+| DeepNorm | 按 decoder-only 层数确定 $\alpha,\beta$ → 初始化指定投影 → 两个残差子层 | 检查输出形状和反向梯度；不宣称复现深层训练收益 |
+
+这些实现用于看清统计量、数据依赖和参数。它们没有融合内核，**不能用作性能基准**。LayerNorm/RMSNorm 的对照使用 FP32；低精度实验见第 10 节。DeepNorm 小 Block 的 $M$ 表示假设的总层数，单个 Block 的运行只检验局部实现；完整模型仍需搭建 $M$ 层并训练验证。
 
 ## 参考资料
 
