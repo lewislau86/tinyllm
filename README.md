@@ -2,17 +2,18 @@
 
 从零实现一个能够训练、生成文本并接受基本评估的 TinyLLM。本项目既讲模型结构，也讲让模型**可训练、稳定训练和正确评估**所需的数据、初始化、优化、精度与工程方法。每章计划包含 Markdown 教案及对应的 PyTorch notebook。
 
-**如果你刚学完大学基础数学与 Python：**先看“从哪里开始”和 Chapter 0 中的“小词典”，再运行 notebook 的前几个实验。下方 24 章是整门课的地图，不要求现在认识每个名词；遇到 MoE、μP 等先知道它们是后续专题即可。
+**如果你刚学完大学基础数学与 Python：**先看“从哪里开始”和 Chapter 0 中的“小词典”，再运行 notebook 的前几个实验。下方 25 章是整门课的地图，不要求现在认识每个名词；遇到 MoE、μP 等先知道它们是后续专题即可。
 
 ## 已完成章节
 
 | 章节 | 内容 | 状态 |
 | --- | --- | --- |
 | [Chapter 0：Normalization](./chapter0_Normalization/) | LayerNorm、RMSNorm、ScaleNorm、QK Norm、DeepNorm；BF16/FP16 数值实验 | 教案与 [ch0.ipynb](./chapter0_Normalization/ch0.ipynb) 已完成 |
+| [Chapter 15：数值精度与混合精度](./chapter15_Precision/) | FP32/FP16/BF16、数值稳定、PyTorch CPU/CUDA/MPS 与可选 MLX 实验 | 教案与 [ch15.ipynb](./chapter15_Precision/ch15.ipynb) 已完成 |
 
 ## 课程路线（规划）
 
-下面是**教学目录**，尚未建立的章节只是规划。现有 Chapter 0 保留原编号。课程按“基础工具 → 构造模型 → 训练模型 → 使用与扩展”推进；实践中可以先完成最小语言模型，再回头深入各类训练策略。
+下面是**教学目录**，未在上表列出的章节只是规划。现有 Chapter 0、Chapter 15 保留原编号。课程按“基础工具 → 构造模型 → 训练模型 → 使用与扩展”推进；实践中可以先完成最小语言模型，再回头深入各类训练策略。
 
 ### 第一阶段：张量与稳定训练基础
 
@@ -37,18 +38,19 @@
 - **Chapter 12 · 优化器**：SGD、Momentum、Adam、AdamW、Adafactor；参数组、优化器状态、AdamW 与 L2 正则的区别。
 - **Chapter 13 · 学习率策略**：Warmup、Cosine Decay、Linear Decay、OneCycle；按 step 更新与学习率曲线。
 - **Chapter 14 · 正则化与泛化**：Weight Decay、L1/L2、Dropout、Label Smoothing、Early Stopping；训练损失与验证损失。区分通用方法与语言模型预训练的具体选择。
-- **Chapter 15 · 梯度与数值精度**：FP32、FP16、BF16、Mixed Precision、autocast；Gradient Clipping、Gradient Scaling（包含 FP16 Loss Scaling）、梯度累积与梯度数值监测。
-- **Chapter 16 · 训练循环与检查点**：DataLoader、forward/backward、optimizer/scheduler step、随机种子、保存与恢复。
-- **Chapter 17 · 训练诊断与评估**：先过拟合一个小 batch，再观察 loss、梯度、验证集困惑度和生成样例。
+- **[Chapter 15 · 数值精度与混合精度](./chapter15_Precision/)**：浮点数的范围与有效位、舍入/下溢/溢出、FP32/FP16/BF16、运算的中间精度、autocast、归一化与精度的关系；包含 PyTorch CPU/CUDA/MPS 和可选 MLX 实验。Chapter 0 只先讲归一化所需的精度基础。
+- **Chapter 16 · 梯度稳定与累积**：Gradient Clipping、FP16 Loss Scaling（`GradScaler`）、梯度累积与梯度数值监测；解释它们在训练循环中的调用顺序。
+- **Chapter 17 · 训练循环与检查点**：DataLoader、forward/backward、optimizer/scheduler step、随机种子、保存与恢复。
+- **Chapter 18 · 训练诊断与评估**：先过拟合一个小 batch，再观察 loss、梯度、验证集困惑度和生成样例。
 
 ### 第四阶段：生成、效率和进阶结构
 
-- **Chapter 18 · 自回归生成**：逐 token 解码、温度、top-k、top-p、停止条件与重复问题。
-- **Chapter 19 · 推理效率**：Prefill/decode、KV cache、注意力时间与显存开销、批量生成。
-- **Chapter 20 · 指令微调**：预训练与监督微调、对话模板、只对答案计算 loss、基础评估。
-- **Chapter 21 · 参数高效与稀疏结构**：LoRA、MoE、结构化/非结构化稀疏、剪枝；分别说明节省的是训练参数、推理计算还是存储。
-- **Chapter 22 · 大规模训练稳定性**：μP、DeepNorm/残差缩放、深度与宽度扩展；在 Chapter 0 的公式基础上比较完整训练配置。
-- **Chapter 23 · 扩展专题**：GQA、FlashAttention、量化、分布式训练、RAG 与对齐方法；根据课程进展拆为独立章节。
+- **Chapter 19 · 自回归生成**：逐 token 解码、温度、top-k、top-p、停止条件与重复问题。
+- **Chapter 20 · 推理效率**：Prefill/decode、KV cache、注意力时间与显存开销、批量生成。
+- **Chapter 21 · 指令微调**：预训练与监督微调、对话模板、只对答案计算 loss、基础评估。
+- **Chapter 22 · 参数高效与稀疏结构**：LoRA、MoE、结构化/非结构化稀疏、剪枝；分别说明节省的是训练参数、推理计算还是存储。
+- **Chapter 23 · 大规模训练稳定性**：μP、DeepNorm/残差缩放、深度与宽度扩展；在 Chapter 0 的公式基础上比较完整训练配置。
+- **Chapter 24 · 扩展专题**：GQA、FlashAttention、量化、分布式训练、RAG 与对齐方法；根据课程进展拆为独立章节。
 
 ## 从哪里开始
 
