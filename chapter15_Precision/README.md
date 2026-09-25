@@ -32,10 +32,25 @@ for dtype in (torch.float32, torch.float16, torch.bfloat16):
 数学上等价的写法，在有限精度的计算机里未必同样可靠。例如数学上 `softmax([1000,1001,1002])` 没问题；直接计算 `exp(1000)` 会溢出。先减去最大值，再求指数，数学结果不变，却让参与 `exp` 的数不大于 0：
 
 $$
-\operatorname{softmax}(x_i)=\frac{\exp(x_i-m)}{\sum_j\exp(x_j-m)},\qquad m=\max_j x_j.
+\mathrm{softmax}(x_i)=\frac{\exp(x_i-m)}{\sum_j\exp(x_j-m)},\qquad m=\max_j x_j.
 $$
 
-这里“稳定”是**改写计算路径，让中间值更容易保持有限**，不是给浮点格式增加有效位。PyTorch 的 `torch.softmax` 可直接调用；教学实验中的“直接 `exp`”只用于展示风险。即使结果有限，仍要与高精度参考比较误差。[PyTorch 数值精度说明](https://docs.pytorch.org/docs/stable/notes/numerical_accuracy.html)
+这里“稳定”是**改写计算路径，让中间值更容易保持有限**，不是给浮点格式增加有效位。PyTorch 的 `torch.softmax` 可直接调用；教学实验中的“直接 `exp`”只用于展示风险。即使结果有限，仍要与高精度参考比较误差。**减最大值只避免指数溢出，不能解决注意力分数差距过大造成的 softmax 饱和**：此时输出仍有限，但概率可能接近 0 或 1。[PyTorch 数值精度说明](https://docs.pytorch.org/docs/stable/notes/numerical_accuracy.html)
+
+### 2.1 精度问题在其他章节出现在哪里？
+
+Chapter 15 讲的是贯穿各处的**有限精度计算规则**。下面按数据经过模型、产生梯度、更新参数的顺序看它与课程主题的关系。表中的“对应章节”指课程目录；尚未完成的章节是后续要展开的主题。
+
+| 位置与现象 | 精度问题是什么 | 对应章节要讲什么 |
+| --- | --- | --- |
+| 初始化和深层残差：激活逐层变大或变小 | FP16 中间结果可能溢出或下溢；即使保持有限，也可能有舍入误差 | [课程目录中的 Chapter 2 与 23](../README.md) 分别讲初始化/残差缩放及更深网络的稳定结构；本章提供判断数值范围的方法。 |
+| 归一化：计算均值、方差或均方根 | 平方、求和、减均值也受 dtype 影响；归一化只能控制所在位置及后续的尺度 | [Chapter 0](../chapter0_Normalization/README.md) 讲算法和位置；本章解释 FP16/BF16 的表示范围与中间精度。 |
+| 注意力：Q/K 点积进入 softmax | 点积可能过大；即使减最大值防止 `exp` 溢出，分数差距很大时概率仍可接近 0/1 | Chapter 7 讲缩放点积、mask 和 softmax；[Chapter 0 的 QK Norm](../chapter0_Normalization/README.md#4-qk-norm) 讲怎样在点积前控制 Q/K 尺度。 |
+| 语言模型损失：用 logits 计算交叉熵 | 直接先算概率、再取对数可能产生 `log(0)`；稳定的 log-sum-exp 计算路径更合适 | Chapter 11 讲交叉熵和 loss mask；本章的 softmax 实验提供数值直觉。 |
+| 反向传播：梯度很小或很大 | FP16 小梯度可能下溢；大梯度或中间反向值可能溢出。Loss Scaling 主要处理前者，梯度裁剪用于限制梯度范数，两者目的不同 | Chapter 16 讲 `GradScaler`、裁剪与梯度累积；本章只讲浮点格式为何会遇到这些问题。 |
+| 优化器与训练循环：更新量很小 | 低精度舍入可能使很小的更新难以反映在参数中；前向的 `NaN/inf` 也会传到损失和梯度 | Chapter 12 讲参数更新，Chapter 17 讲 autocast、backward 和 step 的调用顺序，Chapter 18 讲监测 loss、梯度与非有限值。 |
+
+**读表时分清三类“稳定”：**数值稳定关注 `inf/NaN` 与误差；训练稳定关注梯度、损失和参数更新是否可持续；泛化关注模型在未见数据上的表现。它们有关联，但不能用“没有 `NaN`”证明训练会收敛，也不能用“训练 loss 下降”证明所有数值运算都准确。
 
 ## How：精度怎样影响 LLM 计算？
 
