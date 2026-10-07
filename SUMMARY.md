@@ -2,14 +2,10 @@
 
 * [TinyLLM 教程](README.md)
 
-## 第一阶段：张量与稳定训练基础
-
 * [Chapter 0 · 归一化](chapter0_normalization.md)
 * [Chapter 1 · PyTorch 张量与自动求导](chapter1_pytorch_autograd.md)
 * [Chapter 2 · 初始化与残差路径](chapter2_initialization_residuals.md)
 * [Chapter 3 · 激活函数与门控前馈层](chapter3_activations_ffn.md)
-
-## 第二阶段：构造 Decoder-only 语言模型
 
 * [Chapter 4 · 文本与词元化](chapter4_tokenization.md)
 * [Chapter 5 · 词嵌入与输出层](chapter5_embeddings_output.md)
@@ -17,8 +13,6 @@
 * [Chapter 7 · 自注意力](chapter7_self_attention.md)
 * [Chapter 8 · Transformer Block](chapter8_transformer_block.md)
 * [Chapter 9 · 完整 TinyLLM](chapter9_tinyllm_model.md)
-
-## 第三阶段：数据、目标函数与训练
 
 * [Chapter 10 · 语料与数据管线](chapter10_data_pipeline.md)
 * [Chapter 11 · 语言模型目标函数](chapter11_language_model_loss.md)
@@ -29,8 +23,6 @@
 * [Chapter 16 · 梯度稳定与累积](chapter16_gradient_stability.md)
 * [Chapter 17 · 训练循环与检查点](chapter17_training_loop.md)
 * [Chapter 18 · 训练诊断与评估](chapter18_training_evaluation.md)
-
-## 第四阶段：生成、效率和进阶结构
 
 * [Chapter 19 · 自回归生成](chapter19_autoregressive_generation.md)
 * [Chapter 20 · 推理效率](chapter20_inference_efficiency.md)
