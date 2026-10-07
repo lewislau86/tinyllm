@@ -1,127 +1,156 @@
 # Chapter 1：PyTorch 张量与自动求导
 
-上一章研究了归一化如何处理一个 token 的隐藏向量。本章先退一步：那个向量在代码里是什么？形状为何重要？模型又如何知道参数该往哪个方向更新？答案分别是**张量**、**张量运算**和**自动求导**。
+上一章里，我们看到归一化层接收一串数字，又输出一串数字。真正写模型时，程序还要回答两个问题：**这些数字怎样排在一起？模型怎样知道哪些参数需要调整？**前一个问题靠张量和形状回答，后一个问题靠自动求导回答。本章沿着一次小模型计算，把它们串起来。
 
-本文把 [Datawhale《深入浅出 PyTorch》第二章](https://datawhalechina.github.io/thorough-pytorch/%E7%AC%AC%E4%BA%8C%E7%AB%A0/index.html)的张量、自动求导、并行与硬件内容浓缩到 TinyLLM 的学习场景。配套 [`ch1.ipynb`](./ch1.ipynb) 提供固定数据、预期输出和逐格解释；不要求先有 GPU。
+可以边读边运行 [`ch1.ipynb`](./ch1.ipynb)。先用 CPU 即可；每遇到一个形状或结果，先自己猜，再运行代码核对。本文中的“token”暂时理解为文本中的一个编号；词元化的细节留到 Chapter 4。
 
-## 学习目标
+## 从一批 token 到隐藏向量
 
-1. 读懂 `[batch, seq, hidden]` 等形状，分清索引、转置、变形和复制。
-2. 预测广播后的形状，分清逐元素乘法与矩阵乘法。
-3. 用链式法则解释 `loss.backward()`，检查梯度是否正确、是否累积。
-4. 让模型和数据处于同一设备；知道 MLX 与 PyTorch 的自动求导接口不同。
-
-## What：张量是带形状的一组数
-
-一个数字是 0 维张量，列表可视为 1 维张量，表格是 2 维张量。LLM 的中间结果常有更多维。例如 `[2, 3, 4]` 可以读成“2 个样本，每个样本 3 个 token，每个 token 有 4 个特征”。**轴的名字是我们赋予的语义；PyTorch 只知道各轴长度。**
-
-| 对象 | 常见形状 | 含义 |
-| --- | --- | --- |
-| token ID | `[batch, seq]` | 每个位置对应词表中的整数索引 |
-| 隐藏状态 | `[batch, seq, hidden]` | 每个 token 的浮点特征向量 |
-| 注意力 Q/K | `[batch, heads, seq, head_dim]` | 每个头、每个位置的向量 |
-| 注意力分数 | `[batch, heads, query_len, key_len]` | 每个 query 对各 key 的分数 |
-
-`shape` 回答“每条轴多长”，`ndim` 回答“有几条轴”，`dtype` 回答“每个数怎样存”，`device` 回答“数据在哪个计算设备”。词元 ID 通常为整数，隐藏状态和可训练权重通常为浮点数。`torch.tensor(...)` 从现有数据创建张量；`torch.zeros(...)` 创建指定形状的零张量；`torch.randn(...)` 创建随机张量。后者适合实验，但真实模型参数的初始化规则将在 [Chapter 2](../chapter2_Initialization_Residuals/README.md) 学习。
+假设有两句话，每句话都取三个 token。用整数给它们编号：
 
 ```python
 import torch
 
 token_ids = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=torch.long)
+print(token_ids.shape)  # torch.Size([2, 3])
+```
+
+外层有两行，表示两句话；每行有三个数，表示三个 token。所以形状 `[2, 3]` 的两个位置分别是**样本数**和**每条样本的 token 数**，常记作 `[batch, seq]`。形状是张量的“尺寸说明”；轴名是我们根据用途给它的解释，PyTorch 并不知道第二轴一定是句子长度。
+
+token 编号只是索引，不能直接告诉模型“这个词有什么特征”。假设后续步骤把每个编号变成四个浮点数，那么一批隐藏向量就有三个轴：
+
+```python
 hidden = torch.arange(24, dtype=torch.float32).reshape(2, 3, 4)
-print(token_ids.shape, token_ids.dtype)  # torch.Size([2, 3]), torch.int64
-print(hidden.shape, hidden.ndim)          # torch.Size([2, 3, 4]), 3
+print(hidden.shape)       # torch.Size([2, 3, 4])
+print(hidden[0, 1, :])    # tensor([4., 5., 6., 7.])
 ```
 
-### 索引、变形、转置：别把轴换错
+`[2, 3, 4]` 读作：**2 条样本 × 每条 3 个 token × 每个 token 4 个特征**，简写为 `[batch, seq, hidden]`。`hidden[0, 1, :]` 选中第一条样本的第二个 token；最后的 `:` 表示取它的全部四个特征。索引从 0 开始。`torch.arange(24)` 只是为演示形状填入 0 到 23，真实隐藏向量来自模型计算。
 
-`hidden[0, 1, :]` 是第一个样本、第二个 token 的 4 维向量。`reshape(2, 12)` 改变形状；`transpose(1, 2)` **交换轴**，从 `[2, 3, 4]` 得到 `[2, 4, 3]`。两者不是同一种操作。`view` 要求兼容的内存布局；转置后的张量通常不连续，直接 `view` 可能报错，可先 `contiguous()` 或使用 `reshape()`。
+看张量时再留意三个属性：`ndim` 是轴数，`dtype` 是每个数的类型，`device` 是它存放和计算的位置。上面的 `token_ids` 是整数；`hidden` 是浮点数。可训练参数通常也是浮点数。`torch.tensor(...)` 用现有数据创建张量，`torch.zeros(...)` 创建全零张量，`torch.randn(...)` 创建随机张量；模型参数该怎样初始化要在 [Chapter 2](../chapter2_Initialization_Residuals/README.md) 再讨论。
+
+## 改变形状，还是交换轴？
+
+原来的 `[2, 3, 4]` 一共有 $2\times3\times4=24$ 个数。`reshape(2, 12)` 把每条样本的 `3×4` 个位置合在一轴，数字总数不变：
 
 ```python
-q = torch.randn(2, 3, 4, 5)       # [batch, heads, query_len, head_dim]
-k = torch.randn(2, 3, 6, 5)       # [batch, heads, key_len, head_dim]
-scores = q @ k.transpose(-2, -1)  # [2, 3, 4, 6]：最后两轴变成 [head_dim, key_len]
+flat = hidden.reshape(2, 12)
+print(flat.shape)  # torch.Size([2, 12])
 ```
 
-这里必须转置 K 的**末尾两轴**。`k.T` 会反转所有轴，四维注意力里通常不对。`reshape()` 可能返回视图，也可能复制数据，不能假定它一定创建独立副本；需要独立数据时明确调用 `clone()`。索引得到的切片也可能共享底层存储。参见 [PyTorch reshape 文档](https://docs.pytorch.org/docs/stable/generated/torch.reshape.html)、[view 文档](https://docs.pytorch.org/docs/stable/generated/torch.Tensor.view.html)。
+`transpose` 做的是另一件事：**交换轴**。`hidden.transpose(1, 2)` 得到 `[2, 4, 3]`。原来第二轴代表 token、第三轴代表特征；交换后，第二轴代表特征、第三轴代表 token。不能仅凭数字总数相同，就把 `reshape` 和 `transpose` 当成同一种操作。
 
-## How：广播和矩阵乘法如何组合
+这一章先把形状和轴的含义看清即可。需要注意内存时再记住：`reshape()` 可能返回共享数据的视图，也可能复制；`view()` 对内存布局要求更严格；如果确实需要独立副本，请明确使用 `clone()`。[PyTorch 的 reshape 文档](https://docs.pytorch.org/docs/stable/generated/torch.reshape.html)说明了这一点。
 
-**广播**让某个长度为 1 或缺失的轴在运算时扩展。比较两个形状时，从右往左看：对应轴相等，或其中一个为 1，才可广播。
+## 给每个 token 做同一笔计算
+
+假设希望四个特征分别加上 1、2、3、4。不必写循环逐个处理 token，可以把长度为 4 的向量加到整个 `hidden` 上：
 
 ```python
-x = torch.zeros(2, 3, 4)      # [batch, seq, hidden]
-bias = torch.tensor([1., 2., 3., 4.])  # [hidden]
-y = x + bias                 # [2, 3, 4]：每个 token 加同一条 bias
+bias = torch.tensor([1., 2., 3., 4.])
+shifted = hidden + bias
+print(shifted.shape)       # torch.Size([2, 3, 4])
+print(shifted[0, 1, :])    # tensor([5., 7., 9., 11.])
 ```
 
-`x * bias` 是逐元素乘法；`x @ weight` 是矩阵乘法。如果 `weight` 为 `[4, 6]`，那么 `x @ weight` 为 `[2, 3, 6]`：最后一维从 4 个输入特征变成 6 个输出特征。`nn.Linear(in_features=4, out_features=6)` 存储的 `weight` 则是 `[6, 4]`，其前向计算相当于 `x @ linear.weight.T + linear.bias`。**读网络代码先核对形状，再看数值。** 参见 [PyTorch 广播规则](https://docs.pytorch.org/docs/stable/notes/broadcasting.html)、[`nn.Linear` 文档](https://docs.pytorch.org/docs/stable/generated/torch.nn.Linear.html)。
+`bias` 对准最后一轴的四个特征；两条样本中的每个 token 都加同一组数。这叫**广播**。判断能否广播时，从形状最右边开始比较：两轴长度相等，或其中一轴为 1，才可以配对；缺少的左侧轴可看作长度为 1。`[2, 3, 4] + [4]` 可以，`[2, 3, 4] + [3]` 不可以，因为最后一轴的 4 和 3 对不上。[PyTorch 广播规则](https://docs.pytorch.org/docs/stable/notes/broadcasting.html)给出了完整定义。
+
+加法和 `*` 都是逐位置运算。如果要把一个 token 的**四个旧特征组合成六个新特征**，则要用矩阵乘法。设权重形状为 `[4, 6]`：
 
 ```python
-linear = torch.nn.Linear(
-    in_features=4,   # 输入向量最后一维
-    out_features=6,  # 输出向量最后一维
-    bias=True,       # 创建长度为 6 的可学习偏置
-)
-out = linear(x)      # [2, 3, 6]
+weight = torch.ones(4, 6)
+out = hidden @ weight
+print(out.shape)          # torch.Size([2, 3, 6])
+print(out[0, 1, :])       # tensor([22., 22., 22., 22., 22., 22.])
 ```
 
-## How：自动求导怎样找到更新方向
+`@` 在每个 token 上做一遍“长度 4 的向量 × 4 行 6 列的矩阵”。前两轴仍是 2 和 3，最后一轴变成 6。比如 `hidden[0, 1, :]` 是 `[4, 5, 6, 7]`，这里权重全为 1，因此六个输出都是 $4+5+6+7=22$。真实权重会在训练中改变，让模型学习不同的特征组合。
 
-想象一个只有一个参数的模型，预测值为 $wx$，目标为 $t$，损失为 $L=(wx-t)^2$。若把 $w$ 略微增大，损失怎样变化？这个变化率就是梯度：
+PyTorch 用 `nn.Linear(4, 6)` 封装这类计算。它内部存储的 `weight` 是 `[6, 4]`，计算时会转置权重，再加一个长度为 6 的偏置。因此输入 `[2, 3, 4]`，输出仍是 `[2, 3, 6]`：
+
+```python
+linear = torch.nn.Linear(4, 6)
+print(linear.weight.shape)   # torch.Size([6, 4])
+print(linear(hidden).shape)  # torch.Size([2, 3, 6])
+```
+
+到这里，张量已经能从输入走到输出。但权重一开始并不知道怎样产生“好”的输出。为了看清训练的原理，我们暂时把许多权重缩成**一个参数**。
+
+## 一个参数怎样知道该往哪边走
+
+给模型输入 $x=3$，希望它预测目标 $t=1$。模型只做一件事：用参数 $w$ 乘输入，预测值是 $wx$。如果从 $w=2$ 开始，预测是 6，离目标 1 很远。用平方误差衡量差距：
 
 $$
-\frac{\partial L}{\partial w}=2(wx-t)x
+p=wx,\qquad L=(p-t)^2
 $$
 
-这是链式法则：先求损失对预测值的变化，再乘预测值对参数的变化。PyTorch 在前向运算时记录计算关系；`loss.backward()` 沿图反向传播，把叶子参数的梯度放进 `.grad`。`requires_grad=True` 表示追踪这个张量参与的运算；由运算产生的结果通常带有 `grad_fn`。若输出是向量，需先通过 `.sum()`、`.mean()` 等得到标量损失，或者向 `backward` 提供同形状的上游梯度。参见 [PyTorch Autograd 教程](https://docs.pytorch.org/tutorials/beginner/basics/autogradqs_tutorial.html)。
+此时 $L=(2\times3-1)^2=25$。$L$ 叫**损失**，数值越小表示这次预测越接近目标。模型要知道把 $w$ 往哪个方向调，先得知道：$w$ 增大一点，损失会怎样变化。这个变化率就是损失对 $w$ 的**梯度**。
+
+把计算拆成两步更容易理解：$p=wx$，$L=(p-t)^2$。预测值 $p$ 每增加一点，损失的变化率是 $2(p-t)$；参数 $w$ 每增加一点，预测值的变化率是 $x$。把两段影响接起来，就是链式法则：
+
+$$
+\frac{\partial L}{\partial w}
+=\frac{\partial L}{\partial p}\frac{\partial p}{\partial w}
+=2(p-t)x=2(wx-t)x
+$$
+
+代入 $w=2,x=3,t=1$，梯度是 $2\times(6-1)\times3=30$。正号表示在当前位置把 $w$ 调大，损失会增大；想降低损失，就应把 $w$ 往小的方向调。梯度只描述**当前位置附近**的变化，不保证一步就能找到最好的参数。
+
+每个模型都手推大量参数的导数会很困难。PyTorch 在前向计算时记录运算关系；从损失调用 `backward()` 后，它按链式法则反向计算，把结果写到参数的 `.grad`：
 
 ```python
-w = torch.nn.Parameter(torch.tensor(2.0))  # 可学习的叶子参数
+w = torch.nn.Parameter(torch.tensor(2.0))
 x = torch.tensor(3.0)
 target = torch.tensor(1.0)
-loss = (w * x - target).square()             # (2×3−1)² = 25
-loss.backward()                             # dL/dw = 2×(6−1)×3 = 30
-print(w.grad)                               # tensor(30.)
+
+prediction = w * x
+loss = (prediction - target).square()
+loss.backward()
+
+print(prediction.item())  # 6.0
+print(loss.item())        # 25.0
+print(w.grad.item())      # 30.0
 ```
 
-**关键细节：`.backward()` 默认把新梯度加进 `.grad`，不会自动清零。** 训练每一步前通常用 `optimizer.zero_grad(set_to_none=True)`；本章未引入优化器时可设 `w.grad = None`。故意多步累积梯度是另一种训练策略，将在 [Chapter 16](../chapter16_Gradient_Stability/README.md) 展开。不要通过 `.data` 修改参数或梯度；它会绕开自动求导需要的检查。
+`nn.Parameter` 表示这是要学习的参数，默认会追踪梯度；普通输入 `x` 和目标 `target` 在这个例子里不需要求梯度。`loss` 是标量，所以可以直接调用 `backward()`。`prediction`、`loss` 是计算得到的结果，能看到 `grad_fn`；`w` 是起点参数，梯度通常在它的 `.grad` 中。[PyTorch 自动求导入门](https://docs.pytorch.org/tutorials/beginner/basics/autogradqs_tutorial.html)解释了计算图。
 
-`torch.no_grad()` 让代码块内的运算不建立反向图，常用于推理或参数更新；`tensor.detach()` 从已有图分离一个张量，但可能仍共享存储。若还需要独立副本，用 `tensor.detach().clone()`。`model.eval()` 只切换 Dropout、BatchNorm 等模块的训练/评估行为，**不会自动关闭梯度记录**；推理时通常还需 `torch.no_grad()` 或 `torch.inference_mode()`。参见 [PyTorch Autograd 机制](https://docs.pytorch.org/docs/stable/notes/autograd.html)。
+## 算出梯度后，真正更新一次
 
-### 梯度检查：用小扰动核对公式
-
-对一个标量参数，可用中心差分估计梯度：
-
-$$
-\frac{\partial L}{\partial w}\approx\frac{L(w+h)-L(w-h)}{2h}
-$$
-
-它只是数值近似；在 `float64` 和合适的小 $h$ 下，应该接近自动求导的结果。配套 notebook 同时打印手算值、自动求导值和有限差分值。复杂自定义算子可进一步用 [`torch.autograd.gradcheck`](https://docs.pytorch.org/docs/stable/generated/torch.autograd.gradcheck.html) 检查。
-
-## Do：设备、实验与下一章
-
-PyTorch 张量与模块要放在同一设备：CPU 最通用；有 NVIDIA CUDA 时可用 `cuda`；兼容的 Apple 设备可用 `mps`。**有设备不等于所有算子都支持或结果完全一致**，所以 notebook 先在 CPU 运行核心固定数据实验，再对可用的 CUDA/MPS 做一个小型前向与反向检查，不把它当性能基准。多卡数据并行、张量并行和硬件架构属于进阶主题，本章只建立“同一设备”这一必需概念。参见 [PyTorch 加速器说明](https://docs.pytorch.org/docs/stable/torch.html#accelerators) 与 [MPS 后端说明](https://docs.pytorch.org/docs/stable/notes/mps.html)。
+可以按“旧参数减去学习率乘梯度”走一小步。学习率取 `0.01`，$w$ 从 2 变为 $2-0.01\times30=1.7$；同一个输入的预测从 6 降到 5.1，损失从 25 降到 $(5.1-1)^2=16.81$：
 
 ```python
-device = torch.device("cuda" if torch.cuda.is_available() else
-                      "mps" if torch.backends.mps.is_available() else "cpu")
-model = torch.nn.Linear(4, 6).to(device)
-batch = torch.ones(2, 3, 4, device=device)
-output = model(batch)  # 模型参数与输入在同一设备
+with torch.no_grad():
+    w -= 0.01 * w.grad
+
+new_loss = (w * x - target).square()
+print(w.item())         # 约 1.7
+print(new_loss.item())  # 约 16.81
 ```
 
-**MLX 是另一套框架，不是 `torch.device("mlx")`。** 在 Apple Silicon 上，它使用 `mlx.core.grad` / `value_and_grad` 这样的函数式接口；notebook 的可选小实验单独演示 `mx.grad`，未安装 MLX 时明确跳过。它与 PyTorch 的 `.backward()` 不能直接混用。参见 [MLX 函数变换文档](https://ml-explore.github.io/mlx/build/html/usage/function_transforms.html)。
+`torch.no_grad()` 使这次手动更新不进入求导记录。真实训练通常用优化器执行参数更新；这里手动写出，是为了看清梯度的作用。
 
-### 跟着 notebook 做
+还有一个容易踩的坑：`backward()` 会把新梯度**加到** `.grad` 上。如果在更新前重新前向计算并反传同样的损失，却没有清空旧梯度，30 会累加为 60。准备下一步训练时，先清空：
 
-打开 [`ch1.ipynb`](./ch1.ipynb)，从上到下运行：
+```python
+w.grad = None
+loss = (w * x - target).square()
+loss.backward()
+print(w.grad.item())  # 对应更新后的 w，约为 24.6
+```
 
-1. 观察形状、索引、转置与 `reshape` 的实际输出。
-2. 预测广播、`@` 和 `nn.Linear` 的形状，再与代码核对。
-3. 手算简单损失的梯度，观察两次 `backward()` 的累积。
-4. 对照数值差分，最后检查本机可用的计算设备与 MLX。
+这里得到 $2\times(1.7\times3-1)\times3=24.6$，因为参数已经改变。如果想观察 **30 变 60**，应在更新前连续做两次独立前向与反传。实际训练循环通常在每步开头调用 `optimizer.zero_grad(set_to_none=True)`；有意累积多个小批次的梯度是 [Chapter 16](../chapter16_Gradient_Stability/README.md) 要讲的策略。
 
-读完本章，再看 [Chapter 2：初始化与残差路径](../chapter2_Initialization_Residuals/README.md)：你已知道参数怎样获得梯度，接下来要回答参数初始值与残差连接如何影响深层训练。
+现在把全章连起来看：**张量装输入 → 运算得到预测 → 与目标比较得到损失 → `backward()` 算梯度 → 更新参数 → 再次预测。**语言模型的运算更复杂、参数更多，但训练的骨架就是这一串。
 
-**阅读来源与边界。**本文借鉴 [Datawhale 第二章目录及四个小节](https://datawhalechina.github.io/thorough-pytorch/%E7%AC%AC%E4%BA%8C%E7%AB%A0/index.html)的选题，示例、解释与 TinyLLM 形状均重新编写；API 细节以文中链接的 PyTorch/MLX 官方文档为准。返回 [课程总目录](../README.md#课程路线规划)。
+## 用 notebook 检查几个常见问题
+
+前面的主线足够理解本章。配套 notebook 还安排了几组实验，帮助你读后面的模型代码：
+
+1. **轴交换。**注意力里的 Q、K 通常有 `[batch, heads, seq, head_dim]` 四个轴。`q @ k.transpose(-2, -1)` 交换 K 的最后两轴，得到 `[batch, heads, query_len, key_len]` 的分数。先能解释前三轴为何保留，再读这行代码；完整注意力机制留到 Chapter 7。
+2. **梯度核对。**把 $w$ 分别改为 $w+h$ 和 $w-h$，用 $[L(w+h)-L(w-h)]/(2h)$ 估计梯度。这叫中心差分，是近似值；在适当的 $h$ 和 `float64` 下，应接近手算与自动求导得到的 30。
+3. **停止记录梯度。**`no_grad()` 阻止代码块中的新运算进入求导图；`detach()` 使已有结果脱离原图；`model.eval()` 只改变某些层（如 Dropout）的运行方式，本身不会关闭梯度记录。
+4. **计算设备。**CPU 足够运行本章。若把模型放在 CUDA 或 MPS 上，输入也要放在同一设备。notebook 的可选实验只检查小型前向和反向能否运行。MLX 是另一套框架，`mx.grad` 与 PyTorch 的 `backward()` 不能混用。
+
+读完后，试着不看代码回答三件事：`[2, 3, 4]` 的三轴各表示什么？`[4]` 的偏置为什么能加到它上面？$w=2,x=3,t=1$ 时，梯度为什么是 30？如果能把这三个答案串成一段话，就已经抓住本章主线。
+
+本文参考 [PyTorch《通过实例学习 PyTorch》中的“张量”和“张量与自动求导”两节](https://docs.pytorch.ac.cn/tutorials/beginner/pytorch_with_examples.html)的学习顺序，并换成 TinyLLM 的形状和一个可手算的参数示例。下一章看 [初始化与残差路径](../chapter2_Initialization_Residuals/README.md)：参数从哪里开始，以及信息怎样经过更深的网络。返回 [课程总目录](../README.md#课程路线规划)。
