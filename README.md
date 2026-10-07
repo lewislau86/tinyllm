@@ -8,8 +8,8 @@
 
 | 章节                                                                                                          | 内容                                                          | 状态                                                    |
 | ----------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | ----------------------------------------------------- |
-| [Chapter 0：Normalization](di-yi-jie-duan-zhang-liang-yu-wen-ding-xun-lian-ji-chu/chapter0_normalization.md) | LayerNorm、RMSNorm、ScaleNorm、QK Norm、DeepNorm；BF16/FP16 数值实验 | 教案与 [ch0.ipynb](chapter0_Normalization/ch0.ipynb) 已完成 |
-| [Chapter 15：数值精度与混合精度](di-san-jie-duan-shu-ju-mu-biao-han-shu-yu-xun-lian/chapter15_precision.md)           | FP32/FP16/BF16、数值稳定、PyTorch CPU/CUDA/MPS 与可选 MLX 实验         | 教案与 [ch15.ipynb](chapter15_Precision/ch15.ipynb) 已完成  |
+| [Chapter 0：Normalization](chapter0_normalization.md) | LayerNorm、RMSNorm、ScaleNorm、QK Norm、DeepNorm；BF16/FP16 数值实验 | 教案与 [ch0.ipynb](chapter0_Normalization/ch0.ipynb) 已完成 |
+| [Chapter 15：数值精度与混合精度](chapter15_precision.md)           | FP32/FP16/BF16、数值稳定、PyTorch CPU/CUDA/MPS 与可选 MLX 实验         | 教案与 [ch15.ipynb](chapter15_Precision/ch15.ipynb) 已完成  |
 
 ## 课程路线（规划）
 
@@ -17,40 +17,40 @@
 
 ### 第一阶段：张量与稳定训练基础
 
-* [**Chapter 0 · 归一化**](di-yi-jie-duan-zhang-liang-yu-wen-ding-xun-lian-ji-chu/chapter0_normalization.md)：已有 LayerNorm、RMSNorm、ScaleNorm、QK Norm、DeepNorm、Pre/Post-Norm 与 FP16/BF16 实验；后续补充 BatchNorm、GroupNorm 的对照。
-* [**Chapter 1 · PyTorch 张量与自动求导**](di-yi-jie-duan-zhang-liang-yu-wen-ding-xun-lian-ji-chu/chapter1_pytorch_autograd.md)：维度、广播、矩阵乘法、参数、计算图、反向传播、梯度检查。已有 PyTorch 基础可跳读。
-* [**Chapter 2 · 初始化与残差路径**](di-yi-jie-duan-zhang-liang-yu-wen-ding-xun-lian-ji-chu/chapter2_initialization_residuals.md)：正态/截断正态、Xavier、He 初始化；Residual Connection、Pre/Post-Norm、残差缩放、深度增加时的激活和梯度。
-* [**Chapter 3 · 激活函数与门控前馈层**](di-yi-jie-duan-zhang-liang-yu-wen-ding-xun-lian-ji-chu/chapter3_activations_ffn.md)：ReLU、GELU、SiLU/Swish、SwiGLU；函数曲线、梯度、参数量与 MLP 结构。
+* [**Chapter 0 · 归一化**](chapter0_normalization.md)：已有 LayerNorm、RMSNorm、ScaleNorm、QK Norm、DeepNorm、Pre/Post-Norm 与 FP16/BF16 实验；后续补充 BatchNorm、GroupNorm 的对照。
+* [**Chapter 1 · PyTorch 张量与自动求导**](chapter1_pytorch_autograd.md)：维度、广播、矩阵乘法、参数、计算图、反向传播、梯度检查。已有 PyTorch 基础可跳读。
+* [**Chapter 2 · 初始化与残差路径**](chapter2_initialization_residuals.md)：正态/截断正态、Xavier、He 初始化；Residual Connection、Pre/Post-Norm、残差缩放、深度增加时的激活和梯度。
+* [**Chapter 3 · 激活函数与门控前馈层**](chapter3_activations_ffn.md)：ReLU、GELU、SiLU/Swish、SwiGLU；函数曲线、梯度、参数量与 MLP 结构。
 
 ### 第二阶段：构造 Decoder-only 语言模型
 
-* [**Chapter 4 · 文本与词元化**](di-er-jie-duan-gou-zao-decoderonly-yu-yan-mo-xing/chapter4_tokenization.md)：Unicode/字节、词表、BPE、特殊 token、编码和解码。
-* [**Chapter 5 · 词嵌入与输出层**](di-er-jie-duan-gou-zao-decoderonly-yu-yan-mo-xing/chapter5_embeddings_output.md)：token ID 到向量、logits、输出投影、Weight Tying（输入输出权重共享）。
-* [**Chapter 6 · 位置表示**](di-er-jie-duan-gou-zao-decoderonly-yu-yan-mo-xing/chapter6_position_encoding.md)：绝对位置编码、RoPE，位置作用于注意力的哪个环节。
-* [**Chapter 7 · 自注意力**](di-er-jie-duan-gou-zao-decoderonly-yu-yan-mo-xing/chapter7_self_attention.md)：Q/K/V、缩放点积、因果 mask、多头注意力、张量转置与形状核对。
-* [**Chapter 8 · Transformer Block**](di-er-jie-duan-gou-zao-decoderonly-yu-yan-mo-xing/chapter8_transformer_block.md)：注意力、前馈层、残差、归一化的连接方式；搭建多个 Block。
-* [**Chapter 9 · 完整 TinyLLM**](di-er-jie-duan-gou-zao-decoderonly-yu-yan-mo-xing/chapter9_tinyllm_model.md)：组装 Decoder-only 模型，检查参数量、前向形状和下一 token logits。
+* [**Chapter 4 · 文本与词元化**](chapter4_tokenization.md)：Unicode/字节、词表、BPE、特殊 token、编码和解码。
+* [**Chapter 5 · 词嵌入与输出层**](chapter5_embeddings_output.md)：token ID 到向量、logits、输出投影、Weight Tying（输入输出权重共享）。
+* [**Chapter 6 · 位置表示**](chapter6_position_encoding.md)：绝对位置编码、RoPE，位置作用于注意力的哪个环节。
+* [**Chapter 7 · 自注意力**](chapter7_self_attention.md)：Q/K/V、缩放点积、因果 mask、多头注意力、张量转置与形状核对。
+* [**Chapter 8 · Transformer Block**](chapter8_transformer_block.md)：注意力、前馈层、残差、归一化的连接方式；搭建多个 Block。
+* [**Chapter 9 · 完整 TinyLLM**](chapter9_tinyllm_model.md)：组装 Decoder-only 模型，检查参数量、前向形状和下一 token logits。
 
 ### 第三阶段：数据、目标函数与训练
 
-* [**Chapter 10 · 语料与数据管线**](di-san-jie-duan-shu-ju-mu-biao-han-shu-yu-xun-lian/chapter10_data_pipeline.md)：清洗、去重、训练/验证划分、shuffle、batching、bucketing、数据来源混合、数据泄漏检查。
-* [**Chapter 11 · 语言模型目标函数**](di-san-jie-duan-shu-ju-mu-biao-han-shu-yu-xun-lian/chapter11_language_model_loss.md)：输入与目标错位、softmax、交叉熵、负对数似然、困惑度、padding 与 loss mask。
-* [**Chapter 12 · 优化器**](di-san-jie-duan-shu-ju-mu-biao-han-shu-yu-xun-lian/chapter12_optimizers.md)：SGD、Momentum、Adam、AdamW、Adafactor；参数组、优化器状态、AdamW 与 L2 正则的区别。
-* [**Chapter 13 · 学习率策略**](di-san-jie-duan-shu-ju-mu-biao-han-shu-yu-xun-lian/chapter13_learning_rate.md)：Warmup、Cosine Decay、Linear Decay、OneCycle；按 step 更新与学习率曲线。
-* [**Chapter 14 · 正则化与泛化**](di-san-jie-duan-shu-ju-mu-biao-han-shu-yu-xun-lian/chapter14_regularization.md)：Weight Decay、L1/L2、Dropout、Label Smoothing、Early Stopping；训练损失与验证损失。区分通用方法与语言模型预训练的具体选择。
-* [**Chapter 15 · 数值精度与混合精度**](di-san-jie-duan-shu-ju-mu-biao-han-shu-yu-xun-lian/chapter15_precision.md)：浮点数的范围与有效位、舍入/下溢/溢出、FP32/FP16/BF16、运算的中间精度、autocast、归一化与精度的关系；包含 PyTorch CPU/CUDA/MPS 和可选 MLX 实验。Chapter 0 只先讲归一化所需的精度基础。
-* [**Chapter 16 · 梯度稳定与累积**](di-san-jie-duan-shu-ju-mu-biao-han-shu-yu-xun-lian/chapter16_gradient_stability.md)：Gradient Clipping、FP16 Loss Scaling（`GradScaler`）、梯度累积与梯度数值监测；解释它们在训练循环中的调用顺序。
-* [**Chapter 17 · 训练循环与检查点**](di-san-jie-duan-shu-ju-mu-biao-han-shu-yu-xun-lian/chapter17_training_loop.md)：DataLoader、forward/backward、optimizer/scheduler step、随机种子、保存与恢复。
-* [**Chapter 18 · 训练诊断与评估**](di-san-jie-duan-shu-ju-mu-biao-han-shu-yu-xun-lian/chapter18_training_evaluation.md)：先过拟合一个小 batch，再观察 loss、梯度、验证集困惑度和生成样例。
+* [**Chapter 10 · 语料与数据管线**](chapter10_data_pipeline.md)：清洗、去重、训练/验证划分、shuffle、batching、bucketing、数据来源混合、数据泄漏检查。
+* [**Chapter 11 · 语言模型目标函数**](chapter11_language_model_loss.md)：输入与目标错位、softmax、交叉熵、负对数似然、困惑度、padding 与 loss mask。
+* [**Chapter 12 · 优化器**](chapter12_optimizers.md)：SGD、Momentum、Adam、AdamW、Adafactor；参数组、优化器状态、AdamW 与 L2 正则的区别。
+* [**Chapter 13 · 学习率策略**](chapter13_learning_rate.md)：Warmup、Cosine Decay、Linear Decay、OneCycle；按 step 更新与学习率曲线。
+* [**Chapter 14 · 正则化与泛化**](chapter14_regularization.md)：Weight Decay、L1/L2、Dropout、Label Smoothing、Early Stopping；训练损失与验证损失。区分通用方法与语言模型预训练的具体选择。
+* [**Chapter 15 · 数值精度与混合精度**](chapter15_precision.md)：浮点数的范围与有效位、舍入/下溢/溢出、FP32/FP16/BF16、运算的中间精度、autocast、归一化与精度的关系；包含 PyTorch CPU/CUDA/MPS 和可选 MLX 实验。Chapter 0 只先讲归一化所需的精度基础。
+* [**Chapter 16 · 梯度稳定与累积**](chapter16_gradient_stability.md)：Gradient Clipping、FP16 Loss Scaling（`GradScaler`）、梯度累积与梯度数值监测；解释它们在训练循环中的调用顺序。
+* [**Chapter 17 · 训练循环与检查点**](chapter17_training_loop.md)：DataLoader、forward/backward、optimizer/scheduler step、随机种子、保存与恢复。
+* [**Chapter 18 · 训练诊断与评估**](chapter18_training_evaluation.md)：先过拟合一个小 batch，再观察 loss、梯度、验证集困惑度和生成样例。
 
 ### 第四阶段：生成、效率和进阶结构
 
-* [**Chapter 19 · 自回归生成**](di-si-jie-duan-sheng-cheng-xiaolhe-jin-jie-jie-gou/chapter19_autoregressive_generation.md)：逐 token 解码、温度、top-k、top-p、停止条件与重复问题。
-* [**Chapter 20 · 推理效率**](di-si-jie-duan-sheng-cheng-xiaolhe-jin-jie-jie-gou/chapter20_inference_efficiency.md)：Prefill/decode、KV cache、注意力时间与显存开销、批量生成。
-* [**Chapter 21 · 指令微调**](di-si-jie-duan-sheng-cheng-xiaolhe-jin-jie-jie-gou/chapter21_instruction_finetuning.md)：预训练与监督微调、对话模板、只对答案计算 loss、基础评估。
-* [**Chapter 22 · 参数高效与稀疏结构**](di-si-jie-duan-sheng-cheng-xiaolhe-jin-jie-jie-gou/chapter22_peft_sparsity.md)：LoRA、MoE、结构化/非结构化稀疏、剪枝；分别说明节省的是训练参数、推理计算还是存储。
-* [**Chapter 23 · 大规模训练稳定性**](di-si-jie-duan-sheng-cheng-xiaolhe-jin-jie-jie-gou/chapter23_large_model_stability.md)：μP、DeepNorm/残差缩放、深度与宽度扩展；在 Chapter 0 的公式基础上比较完整训练配置。
-* [**Chapter 24 · 扩展专题**](di-si-jie-duan-sheng-cheng-xiaolhe-jin-jie-jie-gou/chapter24_advanced_topics.md)：GQA、FlashAttention、量化、分布式训练、RAG 与对齐方法；根据课程进展拆为独立章节。
+* [**Chapter 19 · 自回归生成**](chapter19_autoregressive_generation.md)：逐 token 解码、温度、top-k、top-p、停止条件与重复问题。
+* [**Chapter 20 · 推理效率**](chapter20_inference_efficiency.md)：Prefill/decode、KV cache、注意力时间与显存开销、批量生成。
+* [**Chapter 21 · 指令微调**](chapter21_instruction_finetuning.md)：预训练与监督微调、对话模板、只对答案计算 loss、基础评估。
+* [**Chapter 22 · 参数高效与稀疏结构**](chapter22_peft_sparsity.md)：LoRA、MoE、结构化/非结构化稀疏、剪枝；分别说明节省的是训练参数、推理计算还是存储。
+* [**Chapter 23 · 大规模训练稳定性**](chapter23_large_model_stability.md)：μP、DeepNorm/残差缩放、深度与宽度扩展；在 Chapter 0 的公式基础上比较完整训练配置。
+* [**Chapter 24 · 扩展专题**](chapter24_advanced_topics.md)：GQA、FlashAttention、量化、分布式训练、RAG 与对齐方法；根据课程进展拆为独立章节。
 
 ## 从哪里开始
 

@@ -2,4 +2,4 @@
 
 本章教案与实验尚在规划中。预计覆盖：DataLoader、forward/backward、optimizer/scheduler step、随机种子、保存与恢复。
 
-返回 [课程总目录](../README.md#课程路线规划)。
+返回 [课程总目录](README.md#课程路线规划)。

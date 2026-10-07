@@ -2,7 +2,7 @@
 
 本章梳理 Transformer/LLM 中有代表性的归一化技术。**LayerNorm、RMSNorm、ScaleNorm、QK Norm、DeepNorm 都是本章的正式主题**。它们解决的问题并不完全相同：有的处理每个 token 的隐藏向量，有的处理注意力中的 query/key，有的调整残差路径。因此应平等学习、按作用位置比较，而不能简单地用一张“谁更先进”的排行榜代替分析。
 
-本章包含理论、PyTorch API 调用示例，以及可逐格运行的 [`ch0.ipynb`](../chapter0_Normalization/ch0.ipynb)。notebook 既有固定数据实验，也有五种方法的教学版实现；每段代码后都解释如何阅读结果。
+本章包含理论、PyTorch API 调用示例，以及可逐格运行的 [`ch0.ipynb`](chapter0_Normalization/ch0.ipynb)。notebook 既有固定数据实验，也有五种方法的教学版实现；每段代码后都解释如何阅读结果。
 
 ## 学习目标
 
@@ -13,7 +13,7 @@
 
 ## 配合阅读的交互演示
 
-这些网页可以直接在浏览器里操作。它们用于建立直觉；本章公式与 [`ch0.ipynb`](../chapter0_Normalization/ch0.ipynb) 才是核对具体数值和 PyTorch 实现的依据。
+这些网页可以直接在浏览器里操作。它们用于建立直觉；本章公式与 [`ch0.ipynb`](chapter0_Normalization/ch0.ipynb) 才是核对具体数值和 PyTorch 实现的依据。
 
 | 演示                                                                                                                      | 建议怎样看                                                                                    | 对应本章                    |
 | ----------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | ----------------------- |
@@ -240,7 +240,7 @@ y = norm(alpha * x + branch) # 先缩放残差、相加，再归一化
 
 完整 DeepNorm 还要求按 [DeepNet 论文](https://arxiv.org/abs/2203.00555) 为相应编码器/解码器设置 `alpha` 和线性层初始化；单独调用 `nn.LayerNorm` 不能代表整个方案。
 
-对 **decoder-only、共 $M$ 个 Transformer 层** 的情况，论文给出 $\alpha=(2M)^{1/4}$、初始化缩放 $\beta=(8M)^{-1/4}$。先对层权重做标准初始化（论文举 Xavier 为例），再用 $\beta$ 缩放前馈网络的权重，以及注意力的 value 投影和 output 投影权重；query/key 投影不在这份指定清单内。编码器或 encoder-decoder 的系数不同，不能套用这组公式。计算、初始化时机和被缩放的权重清单见 [DeepNet 论文第 4.3 节](https://arxiv.org/pdf/2203.00555)。[`ch0.ipynb`](../chapter0_Normalization/ch0.ipynb) 会计算给定 $M$ 的系数，并构造一个带因果注意力和前馈层的小型 decoder-only Block；这仍不是深层训练效果验证。
+对 **decoder-only、共 $M$ 个 Transformer 层** 的情况，论文给出 $\alpha=(2M)^{1/4}$、初始化缩放 $\beta=(8M)^{-1/4}$。先对层权重做标准初始化（论文举 Xavier 为例），再用 $\beta$ 缩放前馈网络的权重，以及注意力的 value 投影和 output 投影权重；query/key 投影不在这份指定清单内。编码器或 encoder-decoder 的系数不同，不能套用这组公式。计算、初始化时机和被缩放的权重清单见 [DeepNet 论文第 4.3 节](https://arxiv.org/pdf/2203.00555)。[`ch0.ipynb`](chapter0_Normalization/ch0.ipynb) 会计算给定 $M$ 的系数，并构造一个带因果注意力和前馈层的小型 decoder-only Block；这仍不是深层训练效果验证。
 
 \*\*作用位置。\*\*整个残差块，而非单个 token 向量的独立归一化公式。它保留了 LayerNorm，同时改变残差路径与初始化。
 
@@ -358,7 +358,7 @@ DeepNorm 也没有一个单独的 `nn.DeepNorm` 调用。`nn.LayerNorm(d)(alpha 
 
 ## 9. 动手实验：看归一化前后发生了什么
 
-打开 [`ch0.ipynb`](../chapter0_Normalization/ch0.ipynb)，选择安装了 PyTorch 的 Python 内核，从上到下运行所有单元格。本实验在 PyTorch 2.11.0 上运行通过，使用固定输入，不需要下载数据或训练模型。notebook 逐项打印原始向量、输出向量及最后一维的 `mean`、`RMS`、`L2`，并提供读数说明和练习。输入形状为 `[1, 4, 4]`，即一个 batch、四个 token、每个 token 四个特征。
+打开 [`ch0.ipynb`](chapter0_Normalization/ch0.ipynb)，选择安装了 PyTorch 的 Python 内核，从上到下运行所有单元格。本实验在 PyTorch 2.11.0 上运行通过，使用固定输入，不需要下载数据或训练模型。notebook 逐项打印原始向量、输出向量及最后一维的 `mean`、`RMS`、`L2`，并提供读数说明和练习。输入形状为 `[1, 4, 4]`，即一个 batch、四个 token、每个 token 四个特征。
 
 | 实验            | 输入                                      | 应观察到什么                                               |
 | ------------- | --------------------------------------- | ---------------------------------------------------- |
@@ -375,7 +375,7 @@ notebook 还提供完整的 **输入平移/正数缩放对照**、**decoder-only
 
 ### 实验：给输入平移或缩放
 
-在 [`ch0.ipynb`](../chapter0_Normalization/ch0.ipynb) 中，用同一个向量分别计算 `x`、`x + c`、`a * x`，并分别送入三种方法。暂不考虑 $\epsilon$ 和学到的仿射参数时，LayerNorm 对所有维度加同一个常数不敏感；RMSNorm、ScaleNorm 一般会改变结果。对正的整体乘数 $a$，三者理论上都保持输出不变；当 $\epsilon$ 不可忽略或低精度输入已经舍入时，只能说**近似**不变。负乘数会翻转输出符号（LayerNorm 有非零偏置时还需另外考虑偏置）。
+在 [`ch0.ipynb`](chapter0_Normalization/ch0.ipynb) 中，用同一个向量分别计算 `x`、`x + c`、`a * x`，并分别送入三种方法。暂不考虑 $\epsilon$ 和学到的仿射参数时，LayerNorm 对所有维度加同一个常数不敏感；RMSNorm、ScaleNorm 一般会改变结果。对正的整体乘数 $a$，三者理论上都保持输出不变；当 $\epsilon$ 不可忽略或低精度输入已经舍入时，只能说**近似**不变。负乘数会翻转输出符号（LayerNorm 有非零偏置时还需另外考虑偏置）。
 
 ### PyTorch 函数与参数速查
 
@@ -419,7 +419,7 @@ notebook 分别演示三类情况：① FP16 对微小值的舍入/下溢，② 
 
 ## 11. 五种方法的教学版实现
 
-[`ch0.ipynb` 第 10 节](../chapter0_Normalization/ch0.ipynb) 将公式写成可运行的 `nn.Module`：
+[`ch0.ipynb` 第 10 节](chapter0_Normalization/ch0.ipynb) 将公式写成可运行的 `nn.Module`：
 
 | 方法        | 教学实现中的关键步骤                                            | 检查方式                                         |
 | --------- | ----------------------------------------------------- | -------------------------------------------- |
@@ -433,7 +433,7 @@ notebook 分别演示三类情况：① FP16 对微小值的舍入/下溢，② 
 
 ## 12. Apple 平台上的 MLX 对照
 
-[`ch0.ipynb` 第 12 节](../chapter0_Normalization/ch0.ipynb) 新增可选 MLX 单元：用 `mlx.core` 对照 LayerNorm、RMSNorm、ScaleNorm、QK Norm 的关键运算，并用 `mlx.nn.LayerNorm`、`mlx.nn.RMSNorm` 核对前两者；DeepNorm 只演示局部残差系数，完整方案仍需多层网络与初始化。MLX 使用自己的数组和模块，不能把它当作 PyTorch 的 `device="mlx"`。未安装 MLX 时该节自动跳过；安装与平台要求见 [MLX 官方文档](https://ml-explore.github.io/mlx/build/html/install.html)。本节的手写公式与前面的 PyTorch 教学实现相互对照，不用于速度比较。
+[`ch0.ipynb` 第 12 节](chapter0_Normalization/ch0.ipynb) 新增可选 MLX 单元：用 `mlx.core` 对照 LayerNorm、RMSNorm、ScaleNorm、QK Norm 的关键运算，并用 `mlx.nn.LayerNorm`、`mlx.nn.RMSNorm` 核对前两者；DeepNorm 只演示局部残差系数，完整方案仍需多层网络与初始化。MLX 使用自己的数组和模块，不能把它当作 PyTorch 的 `device="mlx"`。未安装 MLX 时该节自动跳过；安装与平台要求见 [MLX 官方文档](https://ml-explore.github.io/mlx/build/html/install.html)。本节的手写公式与前面的 PyTorch 教学实现相互对照，不用于速度比较。
 
 ## 参考资料
 
