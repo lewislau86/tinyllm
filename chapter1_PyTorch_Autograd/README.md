@@ -86,17 +86,7 @@ $$
 
 此时 $L=(2\times3-1)^2=25$。$L$ 叫**损失**，数值越小表示这次预测越接近目标。模型要知道把 $w$ 往哪个方向调，先得知道：$w$ 增大一点，损失会怎样变化。这个变化率就是损失对 $w$ 的**梯度**。
 
-把计算拆成两步更容易理解：$p=wx$，$L=(p-t)^2$。预测值 $p$ 每增加一点，损失的变化率是 $2(p-t)$；参数 $w$ 每增加一点，预测值的变化率是 $x$。把两段影响接起来，就是链式法则：
-
-$$
-\frac{\partial L}{\partial w}
-=\frac{\partial L}{\partial p}\frac{\partial p}{\partial w}
-=2(p-t)x=2(wx-t)x
-$$
-
-代入 $w=2,x=3,t=1$，梯度是 $2\times(6-1)\times3=30$。正号表示在当前位置把 $w$ 调大，损失会增大；想降低损失，就应把 $w$ 往小的方向调。梯度只描述**当前位置附近**的变化，不保证一步就能找到最好的参数。
-
-每个模型都手推大量参数的导数会很困难。PyTorch 在前向计算时记录运算关系；从损失调用 `backward()` 后，它按链式法则反向计算，把结果写到参数的 `.grad`：
+我们先让 PyTorch 自己回答“梯度是多少”，暂时不写求导公式。把 $w$ 标记为需要学习的参数，再照平常写出预测和损失：
 
 ```python
 w = torch.nn.Parameter(torch.tensor(2.0))
@@ -105,6 +95,13 @@ target = torch.tensor(1.0)
 
 prediction = w * x
 loss = (prediction - target).square()
+
+print(w.requires_grad)           # True：需要计算 w 的梯度
+print(x.requires_grad)           # False：不需要计算输入 x 的梯度
+print(w.grad)                    # None：此时还没有反向计算
+print(prediction.grad_fn is not None)  # True：乘法被记录下来
+print(loss.grad_fn is not None)        # True：损失也连在计算图上
+
 loss.backward()
 
 print(prediction.item())  # 6.0
@@ -112,7 +109,31 @@ print(loss.item())        # 25.0
 print(w.grad.item())      # 30.0
 ```
 
-`nn.Parameter` 表示这是要学习的参数，默认会追踪梯度；普通输入 `x` 和目标 `target` 在这个例子里不需要求梯度。`loss` 是标量，所以可以直接调用 `backward()`。`prediction`、`loss` 是计算得到的结果，能看到 `grad_fn`；`w` 是起点参数，梯度通常在它的 `.grad` 中。[PyTorch 自动求导入门](https://docs.pytorch.org/tutorials/beginner/basics/autogradqs_tutorial.html)解释了计算图。
+这段代码没有写任何导数公式，却得到了 30。发生了什么？前向计算时，PyTorch 一面算数值，一面把依赖关系记下来：`w → 乘以 x → prediction → 减去 target → 平方 → loss`。`grad_fn` 不为空，说明结果知道自己由什么运算产生。调用 `loss.backward()` 后，自动求导从损失沿这些运算往回走，用各运算自带的求导规则和链式法则算到 `w`；结果保存在 `w.grad`。`x` 没有要求梯度，所以它的 `.grad` 仍是 `None`。这条从本次前向计算建立的关系叫**计算图**；下一次重新前向，会建立新的图。
+
+现在才用手算核对自动求导的答案。把计算拆成 $p=wx$ 和 $L=(p-t)^2$ 两步：$p$ 每增加一点，损失的变化率是 $2(p-t)$；$w$ 每增加一点，$p$ 的变化率是 $x$。两段影响相乘，得到
+
+$$
+\frac{\partial L}{\partial w}
+=\frac{\partial L}{\partial p}\frac{\partial p}{\partial w}
+=2(p-t)x=2(wx-t)x=30.
+$$
+
+手算是检查工具；模型真正训练时，代码只需定义前向计算和损失，自动求导负责沿图传回梯度。这里的梯度为正，说明在当前位置把 $w$ 调大，损失会增大；想降低损失，就应把 $w$ 往小的方向调。梯度只描述**当前位置附近**的变化，不保证一步就能找到最好的参数。
+
+模型也不会只有一个参数。下面给预测再加一个可学习偏置 $b$。我们没有手写 $b$ 的求导规则，`backward()` 仍会分别把梯度交给两个参数：
+
+```python
+w2 = torch.nn.Parameter(torch.tensor(2.0))
+b2 = torch.nn.Parameter(torch.tensor(0.0))
+prediction2 = w2 * x + b2
+loss2 = (prediction2 - target).square()
+loss2.backward()
+print(w2.grad.item(), b2.grad.item())  # 30.0 10.0
+print(x.grad)                           # None
+```
+
+两条路径都通向同一个损失：$w_2$ 经过乘法和加法，$b_2$ 经过加法。自动求导会沿各自的路径回传。只看结果也能理解差别：在当前点稍微改变 $b_2$，预测值等量改变，因此它的梯度是 10；稍微改变 $w_2$，预测值会改变输入 $x=3$ 倍，所以梯度是 30。参数一多，自动求导的价值就更明显了。`loss` 是标量，因此能直接调用 `backward()`；若结果是向量，通常先汇总成标量损失。[PyTorch 自动求导入门](https://docs.pytorch.org/tutorials/beginner/basics/autogradqs_tutorial.html)展示了相同的计算图机制。
 
 ## 算出梯度后，真正更新一次
 
