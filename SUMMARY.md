@@ -30,3 +30,4 @@
 * [Chapter 22 · 参数高效与稀疏结构](chapter22_peft_sparsity.md)
 * [Chapter 23 · 大规模训练稳定性](chapter23_large_model_stability.md)
 * [Chapter 24 · 扩展专题](chapter24_advanced_topics.md)
+* [Chapter 25 · Agent 记忆与检索](chapter25_agent_memory.md)
