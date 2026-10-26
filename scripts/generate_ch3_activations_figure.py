@@ -43,3 +43,31 @@ figure.update_layout(
 output = Path(__file__).resolve().parents[1] / "chapter3_Activations_FFN" / "activation-functions.svg"
 figure.write_image(str(output))
 print(output)
+
+derivative_figure = go.Figure()
+derivatives = (
+    ("Sigmoid", torch.sigmoid, "#64748b", "dash"),
+    ("Tanh", torch.tanh, "#059669", "longdash"),
+    (*functions[0],),
+    (*functions[1],),
+    (*functions[2],),
+)
+for name, function, color, dash in derivatives:
+    probe = values.detach().clone().requires_grad_()
+    slope = torch.autograd.grad(function(probe).sum(), probe)[0]
+    derivative_figure.add_trace(go.Scatter(
+        x=probe.detach().tolist(),
+        y=slope.detach().tolist(),
+        mode="lines",
+        name=name,
+        line={"color": color, "width": 3, "dash": dash},
+    ))
+
+derivative_figure.update_layout(figure.layout)
+derivative_figure.update_layout(
+    yaxis={"title": "导数 f'(x)", "range": [-0.25, 1.3], "dtick": 0.25,
+           "zeroline": True, "zerolinecolor": "#64748b", "gridcolor": "#e2e8f0"},
+)
+derivative_output = output.with_name("activation-derivatives.svg")
+derivative_figure.write_image(str(derivative_output))
+print(derivative_output)

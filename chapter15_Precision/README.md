@@ -4,6 +4,10 @@
 
 学完后，你应能区分“范围太窄导致溢出/下溢”和“刻度太粗导致舍入”，说明为何输入、计算中间值和输出可能使用不同精度，并能读懂 `torch.autocast` 的基本用法。这里聚焦前向数值和混合精度；梯度裁剪、FP16 Loss Scaling 与训练循环放在规划中的 Chapter 16–17。
 
+## TinyLLM 主线怎么选
+
+硬件和 PyTorch 算子支持时，训练优先试 **BF16 autocast**，因为它与 FP32 有相近的指数范围，可减少 FP16 常见的溢出/下溢风险；归一化、softmax 和损失等归约仍交给稳定实现处理，并监测有限值。CPU 教学或硬件不支持时用 FP32；只支持 FP16 加速时用 FP16 autocast 并在反向传播中配 `GradScaler`。BF16 的尾数更短，不能因此说它处处比 FP16 准确。[PyTorch AMP 文档](https://docs.pytorch.org/docs/stable/amp.html)给出设备与 dtype 的用法。
+
 ## What：浮点数是什么？
 
 ### 1. 科学计数法，但可用位数有限
