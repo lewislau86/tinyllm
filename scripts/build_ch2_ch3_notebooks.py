@@ -71,6 +71,7 @@ for number, folder in [(2, "chapter2_Initialization_Residuals"),
                 else "chapter3_activations_ffn.md")
     text = (ROOT / filename).read_text(encoding="utf-8")
     text = text.replace(f"{folder}/ch{number}.ipynb", f"./ch{number}.ipynb")
+    text = text.replace(f"{folder}/activation-functions.svg", "./activation-functions.svg")
     text = re.sub(r"\]\((chapter\d+_[^/)]+\.md)(#[^)]+)?\)",
                   lambda m: "](../" + m[1] + (m[2] or "") + ")", text)
     text = text.replace("](README.md#课程路线规划)", "](../README.md#课程路线规划)")
